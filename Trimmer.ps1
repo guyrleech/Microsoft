@@ -10,6 +10,9 @@
     10/03/18  GL  Optimised code
 
     12/03/18  GL  Added reporting
+
+    16/03/18  GL Fixed bug where -available was being passed as False when not specified
+                 Workaround for invocation external to PowerShell for arrays being flattened
 #>
 
 <#
@@ -174,8 +177,8 @@ Param
     [switch]$hardMin ,
     [switch]$thisSession ,
     [int]$processId ,
-    [int[]]$sessionIds ,
-    [int[]]$notSessionIds ,
+    [string[]]$sessionIds ,
+    [string[]]$notSessionIds ,
     [string]$available ,
     [switch]$savings ,
     [switch]$disconnected ,
@@ -261,10 +264,10 @@ Function Schedule-Task
         [switch]$background ,
         [int]$above ,
         [switch]$savings ,
-        [string]$available ,
+        [string]$available = $null,
         [string[]]$processes ,
         [string[]]$exclude ,
-        [string]$logFile
+        [string]$logFile = $null
     )
 
     Write-Verbose "Schedule-Task( $taskFolder , $taskName , $script )"
@@ -531,11 +534,7 @@ if( $install -gt 0 -or $uninstall )
         Exclude = $exclude
         Processes = $processes
         Logfile = $logFile
-    }
-
-    if( ! [ string]::IsNullOrEmpty( $available ) )
-    {
-        $taskArguments.Add( 'Available' , $available )
+        Available = $available
     }
 
     Schedule-Task -taskName "Trim on lock and disconnect for $($env:username)" @taskArguments
@@ -720,6 +719,27 @@ if( $disconnected )
     } )
 }
 
+## Reform arrays as they will not be passed correctly if command not invoked natively in PowerShell, e.g. via cmd or scheduled task
+if( $processes -and $processes.Count -eq 1 -and $processes[0].IndexOf(',') -ge 0 )
+{
+    $processes = $processes -split ','
+}
+
+if( $exclude -and $exclude.Count -eq 1 -and $exclude[0].IndexOf(',') -ge 0 )
+{
+    $exclude = $exclude -split ','
+}
+
+if( $sessionIds -and $sessionIds.Count -eq 1 -and $sessionIds[0].IndexOf(',') -ge 0 )
+{
+    $sessionIds = $sessionIds -split ','
+}
+
+if( $notSessionIds -and $notSessionIds.Count -eq 1 -and $notSessionIds[0].IndexOf(',') -ge 0 )
+{
+    $notSessionIds = $notSessionIds -split ','
+}
+
 Get-Process @params | ForEach-Object `
 {
     $process = $_
@@ -744,14 +764,14 @@ Get-Process @params | ForEach-Object `
         Write-Verbose ( "`tSkipping {0} pid {1} as it is the foreground window process" -f $process.Name , $process.Id )
         $doIt = $false
     }
-    elseif( $sessionIds -and $sessionIds.Count -gt 0 -And $sessionIds -notcontains $process.SessionId )
+    elseif( $sessionIds -and $sessionIds.Count -gt 0 -And $sessionIds -notcontains $process.SessionId.ToString() )
     {
         Write-Verbose ( "`tSkipping {0} pid {1} as session {2} not in list" -f $process.Name , $process.Id , $process.SessionId )
         $doIt = $false
     }
-    elseif( $notsessionIds -and $notSessionIds.Count -gt 0 -And $notSessionIds -contains $process.SessionId )
+    elseif( $notsessionIds -and $notSessionIds.Count -gt 0 -And $notSessionIds -contains $process.SessionId.ToString() )
     {
-        Write-Verbose ( "`tSkipping {0} pid {1} as session {2}" -f $process.Name , $process.Id , $process.SessionId )
+        Write-Verbose ( "`tSkipping {0} pid {1} as session {2} is specifically excluded" -f $process.Name , $process.Id , $process.SessionId )
         $doIt = $false
     }
     elseif( $sessionsToTarget.Count -gt 0 -And $sessionsToTarget -notcontains $process.SessionId )
