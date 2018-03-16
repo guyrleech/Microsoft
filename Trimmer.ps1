@@ -13,6 +13,9 @@
 
     16/03/18  GL Fixed bug where -available was being passed as False when not specified
                  Workaround for invocation external to PowerShell for arrays being flattened
+                 Made process ids parameter an array
+                 Added process id and name filter to Get-Process cmdlet call for efficiency
+                 Added include and exclude options for user names
 #>
 
 <#
@@ -27,6 +30,14 @@ Can reduce the memory footprints of running processes to make more memory availa
 .PARAMETER Processes
 
 A comma separated list of process names to use (without the .exe extension). By default all processes will be trimmed if the script has access to them.
+
+.PARAMETER IncludeUsers
+
+A comma separated of qualified names of process owners to include. Must be run as an admin for this to work. Specify domain or other qualifier, e.g. "NT AUTHORITY\SYSTEM'
+
+.PARAMETER ExcludeUsers
+
+A comma separated of qualified names of process owners to exclude. Must be run as an admin for this to work. Specify domain or other qualifier, e.g. "NT AUTHORITY\NETWORK SERVICE' or DOMAIN\Chris.Harvey
 
 .PARAMETER Exclude
 
@@ -60,9 +71,9 @@ Produce a report of the current working set usage and limit types for processes 
 
 Ue with -report to write the results to a csv format file. If the file already exists the operation will fail.
 
-.PARAMETER ProcessId
+.PARAMETER ProcessIds
 
-Only trim this specific process
+Only trim the specific process ids
 
 .PARAMETER ThisSession
 
@@ -168,6 +179,8 @@ Param
     [switch]$uninstall ,
     [string[]]$processes ,
     [string[]]$exclude , 
+    [string[]]$includeUsers ,
+    [string[]]$excludeUsers ,
     [switch]$report ,
     [string]$outputFile ,
     [int]$above = 10MB ,
@@ -176,7 +189,7 @@ Param
     [switch]$hardMax ,
     [switch]$hardMin ,
     [switch]$thisSession ,
-    [int]$processId ,
+    [string[]]$processIds ,
     [string[]]$sessionIds ,
     [string[]]$notSessionIds ,
     [string]$available ,
@@ -695,10 +708,6 @@ if( ! [string]::IsNullOrEmpty( $available ) )
 [int]$trimmed = 0
 
 $params = @{}
-if( $processId -gt 0 )
-{
-    $params.Add( 'Id' , $processId )
-}
 
 [int[]]$sessionsToTarget = @()
 $results = New-Object -TypeName System.Collections.ArrayList
@@ -720,9 +729,35 @@ if( $disconnected )
 }
 
 ## Reform arrays as they will not be passed correctly if command not invoked natively in PowerShell, e.g. via cmd or scheduled task
-if( $processes -and $processes.Count -eq 1 -and $processes[0].IndexOf(',') -ge 0 )
+if( $processes )
 {
-    $processes = $processes -split ','
+    if( $processes.Count -eq 1 -and $processes[0].IndexOf(',') -ge 0 )
+    {
+        $processes = $processes -split ','
+    }
+    $params.Add( 'Name' , $processes )
+}
+
+if( $processIds )
+{
+    if( $processIds.Count -eq 1 -and $processIds[0].IndexOf(',') -ge 0 )
+    {
+        $processIds = $processIds -split ','
+    }
+    $params.Add( 'Id' , $processIds )
+}
+
+if( $includeUsers -or $excludeUsers )
+{
+    $params.Add( 'IncludeUserName' , $true ) ## Needs admin rights
+    if( $includeUsers.Count -eq 1 -and $includeUsers[0].IndexOf(',') -ge 0 )
+    {
+        $includeUsers = $includeUsers -split ','
+    }
+    if( $excludeUsers.Count -eq 1 -and $excludeUsers[0].IndexOf(',') -ge 0 )
+    {
+        $excludeUsers = $excludeUsers -split ','
+    }
 }
 
 if( $exclude -and $exclude.Count -eq 1 -and $exclude[0].IndexOf(',') -ge 0 )
@@ -744,11 +779,16 @@ Get-Process @params | ForEach-Object `
 {
     $process = $_
     [bool]$doIt = $true
-    if( $processes -and $processes.Count -And $processes -notcontains $process.Name )
+    if( $excludeUsers -and $excludeUsers.Count -And $excludeUsers -contains $process.UserName )
     {
-        Write-Verbose ( "`tSkipping {0} pid {1} as not specified process" -f $process.Name , $process.Id )
+        Write-Verbose ( "`tSkipping {0} pid {1} for user {2} as specifically excluded" -f $process.Name , $process.Id , $process.UserName )
         $doIt = $false
-    }   
+    }
+    elseif( $includeUsers -and $includeUsers.Count -And $includeUsers -notcontains $process.UserName )
+    {
+        Write-Verbose ( "`tSkipping {0} pid {1} for user {2} as not included" -f $process.Name , $process.Id , $process.UserName )
+        $doIt = $false
+    }
     elseif( $exclude -and $exclude.Count -And $exclude -contains $process.Name )
     {
         Write-Verbose ( "`tSkipping {0} pid {1} as specifically excluded" -f $process.Name , $process.Id )
