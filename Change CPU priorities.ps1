@@ -5,6 +5,11 @@
     Use this script at your own risk.
 
     Guy Leech, 2018
+
+    Modification history:
+
+    23/04/18  GL   Added process id capability so can be launched via ControlUp Script Based Action.
+                   Added -forceIt as equivalent to -confirm:$false for use via scheduled tasks
 #>
 
 <#
@@ -52,6 +57,10 @@ A comma separated list of session IDs which will not have their processes examin
 
 Only examine processes in the current session
 
+.PARAMETER forceIt
+
+DO not prompt for confirmation before adjusting CPU priority
+
 .EXAMPLE
 
 & '\Change CPU priorities.ps1' -confirm:$false
@@ -88,6 +97,8 @@ Param
     [string[]]$includeUsers = @() ,
     [string[]]$excludeUsers = @() ,
     [int[]]$excludeSessions = @( 0 ) ,
+    [int[]]$pids = @() ,
+    [switch]$forceIt , 
     [switch]$selfOnly
 )
 
@@ -118,6 +129,11 @@ if( $includeUsers.Count -or $excludeUsers.Count )
         Write-Warning "Unable to get user names as requires PowerShell 3.0 or higher and this is $($PSVersionTable.psversion.ToString())"
         return
     }
+}
+
+if( $pids -and $pids.Count )
+{
+    $getProcessParams.Add( 'Id' , $pids )
 }
 
 [hashtable]$processes = @{}
@@ -157,13 +173,20 @@ Function Revert-Processes( [hashtable]$processes )
 
 Get-Process -Id $pid | Select -First 1 | ForEach-Object { $originalPriority = $_.PriorityClass ; $_.PriorityClass = 'High' }
 
+## workaround for scheduled task not liking -confirm:$false being passed
+if( $forceIt )
+{
+     $ConfirmPreference = 'None'
+}
+
 ## Put main loop in a try block so can revert process priorties back at exit via finally block, e.g. if ctrl-c pressed
 try
 {
     While( $true )
     {
         [int]$excluded = 0
-        Get-Process @getProcessParams | ForEach-Object `
+        [int]$inspected = 0
+        Get-Process @getProcessParams -ErrorAction SilentlyContinue | ForEach-Object `
         {
             $thisProcess = $_
             if( $thisProcess.HasExited )
@@ -201,6 +224,7 @@ try
 
                 if( $included )
                 {
+                    $inspected++
                     ## If we have the process already then look how much CPU it has used since last time sampled
                     $existingProcess = $processes[ $thisProcess.Id ]
                     if( $existingProcess )
@@ -261,6 +285,13 @@ try
             }
         }
     
+        ## see if no pids found/left so that we exit
+        if( $pids -and $pids.Count -and ! $inspected )
+        {
+            Write-Warning "None of the specified pids $($pids -join ', ') were found or were not included or were excluded so exiting"
+            break
+        }
+
         ## remove processes which are no longer alive so have missed the change in the pulse value - have to use a clone of the hashtable since we can't change it when enumerating over it
         if( $processes.Count )
         {
