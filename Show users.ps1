@@ -18,6 +18,15 @@ PowerShell's built-in conmfirmation mechanism is used before each logoff is perf
 .PARAMETER name
 
 A regular expression used to match computers returned from Active Directory that will have their sessions enumerated
+Can also be used to further restrict the machines returned by -ou or -group options
+
+.PARAMETER group
+
+An AD group whose members will be interrogated for user profiles.
+
+.PARAMETER ou
+
+An organisational unit, in either distinguished or canonical name format, whose members will be interrogated for user profiles.
 
 .PARAMETER user
 
@@ -73,8 +82,9 @@ Require the Active Directory PowerShell module to be available
 
 Param
 (
-    [Parameter(mandatory=$true,HelpMessage='Regular expression to match AD computers to interrogate')]
     [string]$name ,
+    [string]$group ,
+    [string]$OU ,
     [string]$user ,
     [Parameter(ParameterSetName='Current')]
     [switch]$current ,
@@ -115,6 +125,7 @@ ForEach( $module in $modules )
     Import-Module $module
 }
 
+[int]$ERROR_INVALID_PARAMETER = 87
 [int]$count = 0
 [int]$machinesWithUsers = 0
 [datetime]$startDate = Get-Date
@@ -157,7 +168,60 @@ elseif( ! [string]::IsNullOrEmpty( $start ) )
     }
 }
 
-[array]$sessions = @( Get-ADComputer -Filter * | Where-Object { $_.Name -match $name } | ForEach-Object `
+[hashtable]$searchProperties = @{}
+[string]$command = $null
+
+if( ! [string]::IsNullOrEmpty( $OU ) )
+{
+    ## see if canonical name (e.g. copied from AD Users & computers) and convert to distinguished
+    if( $OU.IndexOf('/') -gt 0 )
+    {
+        try
+        {
+            ## http://www.itadmintools.com/2011/09/translate-active-directory-name-formats.html
+            $NameTranslate = New-Object -ComObject NameTranslate 
+            [System.__ComObject].InvokeMember( 'Init' , 'InvokeMethod', $null , $NameTranslate , @( 3 , $null ) ) ## ADS_NAME_INITTYPE_GC
+            [System.__ComObject].InvokeMember( 'Set' , 'InvokeMethod', $null , $NameTranslate , (2 ,$OU)) ## CANONICALNAME
+            $OU = [System.__ComObject].InvokeMember('Get' , 'InvokeMethod' , $null , $NameTranslate , 1) ## DISTINGUISHEDNAME
+        }
+        catch
+        {
+            Write-Error "Failed to translate OU `"$OU`" from canonical name to distinguished`n$_"
+            exit $ERROR_INVALID_PARAMETER
+        }
+    }
+    $searchProperties.Add( 'SearchBase' , $OU )
+}
+elseif( ! [string]::IsNullOrEmpty( $group ) )
+{
+    $command = 'Get-ADGroupMember -Recursive -Identity $group  | ? { $_.objectClass -eq ''Computer'' }'
+}
+elseif( [string]::IsNullOrEmpty( $name ) )
+{
+    Write-Error 'Must specify at least one of -group, -OU or -name to define what computers to interrogate'
+    exit $ERROR_INVALID_PARAMETER
+}
+
+if( [string]::IsNullOrEmpty( $command ) )
+{
+    $command = 'Get-ADComputer -Filter * @searchProperties'
+}
+
+[string[]]$columns = @()
+if( $current )
+{
+    $columns = @( 'Machine','UserName',,'SESSIONNAME','Id','STATE','Idle Time','Logon Time','Boot Time' )
+    if( ! $noprofile )
+    {
+        $columns += @( 'Profile Path','Profile Size (MB)' )
+    }
+}
+else
+{
+    $columns = @( 'Machine','UserName','Id','Logon Time', 'Logoff Time' ,'Boot Time' )
+}
+
+[array]$sessions = @( Invoke-Expression $command | Where-Object { $_.Name -match $name } | ForEach-Object `
 {
     $count++
     [string]$machineName = $_.Name
@@ -220,6 +284,10 @@ elseif( ! [string]::IsNullOrEmpty( $start ) )
                                 {
                                     $profiles = @( Get-WmiObject -Class win32_userprofile -ComputerName $machineName -ErrorAction SilentlyContinue )
                                 }
+                                else
+                                {
+                                    $profiles = $null
+                                }
                             }
                             [hashtable]$properties = [ordered]@{ 'Machine' = $machineName ; 'Boot Time' = $( if( $bootTime -lt (Get-Date) ) { $bootTime } else { $null } ) }
 
@@ -239,7 +307,7 @@ elseif( ! [string]::IsNullOrEmpty( $start ) )
                             }
                             if( [string]::IsNullOrEmpty( $user ) -or $properties[ $fieldNames[ 0 ] ] -match $user )
                             {
-                                if( ! $noprofile -and $profiles -and $profiles.Count )
+                                if( $profiles -and $profiles.Count )
                                 {
                                     $sid = (New-Object System.Security.Principal.NTAccount($properties[$fieldNames[0]])).Translate([System.Security.Principal.SecurityIdentifier]).value
                                     $profile = $profiles | Where-Object { $_.sid -eq $sid } 
@@ -335,7 +403,7 @@ elseif( ! [string]::IsNullOrEmpty( $start ) )
             }
         }
     }
- })
+ }) | Select $columns
 
 if( $sessions -and $sessions.Count )
 {
