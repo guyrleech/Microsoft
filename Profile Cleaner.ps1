@@ -3,6 +3,10 @@
     Find all user profiles across machines selected from AD and show size, last access, last AD activity and allow removal
 
     Guy Leech, 2018
+
+    Modification history:
+
+    14/05/18  GL  Added missing help for -group and-ou arguments
 #>
 
 <#
@@ -13,9 +17,18 @@ Those selected when OK is pressed will be deleted.
 
 .DESCRIPTION
 
-.PARAMETER machines
+.PARAMETER name
 
-Regular expression used to match machines retrieved from AD which will have their user profiles enumerated
+Regular expression used to match machines retrieved from AD which will have their user profiles enumerated.
+Can also be used to further restrict the machines returned by -ou or -group options
+
+.PARAMETER group
+
+An AD group whose members will be interrogated for user profiles.
+
+.PARAMETER ou
+
+An organisational unit, in either distinguished or canonical name format, whose members will be interrogated for user profiles.
 
 .PARAMETER excludeUsers
 
