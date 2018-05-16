@@ -3,6 +3,10 @@
     Show all users on all nominated machines, grabbed from AD. Sessions selected in the resultant grid view will then be logged off if "OK" is pressed.
 
     Guy leech, 2018
+
+    Modification history:
+
+    14/05/18  GL  Added -group and -ou options
 #>
 
 <#
@@ -409,7 +413,21 @@ if( $sessions -and $sessions.Count )
 {
     if( [string]::IsNullOrEmpty( $csv ) )
     {
-        $selected = @( $sessions | Out-GridView -Title "$($sessions.Count) sessions found on $machinesWithUsers machines of $count checked" -PassThru )
+        [string]$title = "$($sessions.Count) sessions found on $machinesWithUsers machines " 
+        if( $current )
+        {
+            $title += 'now'
+        }
+        elseif( $sinceBoot )
+        {
+            $title += 'since boot'
+        }
+        else
+        {
+            $title += "between $(Get-Date $startDate -Format G) and $(Get-Date $endDate -Format G)"
+        }
+        $title += " of $count checked"
+        $selected = @( $sessions | Out-GridView -Title $title -PassThru )
 
         if( $selected -and $selected.Count )
         {

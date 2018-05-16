@@ -6,7 +6,7 @@
 
     Modification history:
 
-    14/05/18  GL  Added missing help for -group and-ou arguments
+    14/05/18  GL  Added missing help for -group and -ou arguments
 #>
 
 <#

@@ -19,6 +19,9 @@
 
     30/03/18  GL Added ability to wait for specific list of processes to start before continuing.
                  Added looping
+
+    23/04/18  GL Added exiting from loop if pids specified no longer exist
+                 Added -forceIt as equivalent to -confirm:$false for use via scheduled tasks
 #>
 
 <#
@@ -81,6 +84,10 @@ When MaxWorkingSet is specified, the limit will be enforced so the working set i
 .PARAMETER Loop
 
 Loop infinitely
+
+.PARAMETER forceIt
+
+DO not prompt for confirmation before adjusting CPU priority
 
 .PARAMETER Report
 
@@ -222,6 +229,7 @@ Param
     [switch]$background ,
     [switch]$scheduled ,
     [switch]$logoff ,
+    [switch]$forceIt ,
     [string]$taskFolder = '\MemoryTrimming' 
 )
 
@@ -619,6 +627,12 @@ if( $install -gt 0 -or $uninstall )
 [datetime]$monitoringStartTime = Get-Date
 [int]$thisSessionId = (Get-Process -Id $pid).SessionId
 
+## workaround for scheduled task not liking -confirm:$false being passed
+if( $forceIt )
+{
+     $ConfirmPreference = 'None'
+}
+
 do
 {
     if( $waitFor -and $waitFor.Count )
@@ -842,8 +856,10 @@ do
         $notSessionIds = $notSessionIds -split ','
     }
 
-    Get-Process @params | ForEach-Object `
-    {
+    [int]$adjusted = 0
+
+    Get-Process @params -ErrorAction SilentlyContinue | ForEach-Object `
+    {      
         $process = $_
         [bool]$doIt = $true
         if( $excludeUsers -and $excludeUsers.Count -And $excludeUsers -contains $process.UserName )
@@ -933,6 +949,7 @@ do
                     ## see https://msdn.microsoft.com/en-us/library/windows/desktop/ms686237(v=vs.85).aspx
                     [bool]$result = [PInvoke.Win32.Memory]::SetProcessWorkingSetSizeEx( $process.Handle,$minWorkingSet,$maxWorkingSet,$flags);$LastError = [ComponentModel.Win32Exception][Runtime.InteropServices.Marshal]::GetLastWin32Error()
 
+                    $adjusted++
                     if( ! $result )
                     {
                         Write-Warning ( "Failed to trim {0} pid {1} - {2} " -f $process.Name , $process.Id , $LastError)
@@ -978,8 +995,16 @@ do
     }
     if( $loop )
     {
-        Write-Verbose "$(Get-Date) : sleeping for $pollPeriod seconds before looping"
-        Start-Sleep -Seconds $pollPeriod
+        if( $processIds -and $processIds.Count -and ! $adjusted )
+        {
+            Write-Warning "None of the specified pids $($processIds -join ', ') were found or were not included or were excluded so exiting loop"
+            $loop = $false
+        }
+        else
+        {
+            Write-Verbose "$(Get-Date) : sleeping for $pollPeriod seconds before looping"
+            Start-Sleep -Seconds $pollPeriod
+        }
     }
 } while( $loop )
 
