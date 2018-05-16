@@ -7,6 +7,8 @@
     Modification history:
 
     14/05/18  GL  Added -group and -ou options
+
+    16/05/18  GL  Display SID if fail to resolve it to user name. Move SID lookup to remote machine lest a local account there
 #>
 
 <#
@@ -363,7 +365,18 @@ else
                     if( $events[ $index ].Id -eq 1 )
                     {
                         $logonEvent = $events[ $index ]
-                        [string]$userName = ([Security.Principal.SecurityIdentifier]($logonEvent.UserId)).Translate([Security.Principal.NTAccount]).Value
+                        [string]$userName = 
+                            try
+                            {
+                                ## Look up sid on remote machine in case it is a local account
+                                [string]$sid = $logonEvent.UserId
+                                Invoke-Command -ComputerName $machineName -ScriptBlock { ([Security.Principal.SecurityIdentifier]($using:sid)).Translate([Security.Principal.NTAccount]).Value } -ErrorAction SilentlyContinue
+                            }
+                            catch
+                            {
+                                Write-Warning "Failed to get user name for SID $($logonEvent.UserId) on $machineName"
+                                $logonEvent.UserId
+                            }
                         if( [string]::IsNullOrEmpty( $user ) -or $userName -match $user )
                         {                
                             [int]$sessionId = -1
