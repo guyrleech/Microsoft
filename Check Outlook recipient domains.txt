@@ -2,6 +2,8 @@
 ''
 '' Useful to help stop accidental sending of information to incorrect recipients
 ''
+'' Paste the contents of this file into the ThisOutlookSession object in Outlook (Alt F11) & save it
+''
 '' Guy Leech, 2018
 
 Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
