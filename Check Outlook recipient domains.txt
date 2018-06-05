@@ -1,0 +1,62 @@
+'' When "Send" is invoked on an email, prompt to continue if more than one external domain name found which is different to sender's
+''
+'' Useful to help stop accidental sending of information to incorrect recipients
+''
+'' Guy Leech, 2018
+
+Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
+
+    Dim olNS As Outlook.NameSpace
+    Dim ownDomainName, parts() As String
+    
+    Set olApp = CreateObject("Outlook.Application")
+    Set olNS = olApp.GetNamespace("MAPI")
+    
+    '' Find the domain name for the account sendinf the email (may be Exchange so can't use Sender property
+    For Each Account In olNS.Accounts
+        parts = Split(Account.SmtpAddress, "@")
+        If UBound(parts) = 1 Then
+            If ownDomainName = "" Then
+                ownDomainName = parts(1)
+            ElseIf ownDomainName <> parts(1) Then
+                MsgBox "Found multiple different domain names for sender", vbInformation + vbOKOnly, "Warning"
+            End If
+        End If
+    Next
+    
+    If ownDomainName = "" Then
+        MsgBox "Unable to determine sender's email domain", vbCritical + vbOKOnly, "Serious Error"
+    End If
+    
+    Dim existing As String
+    Dim domains As Collection
+    Set domains = New Collection
+    
+    '' to hide error if item added to collection is already present
+    On Error Resume Next
+    
+    '' add all domain names which aren't the same as the senders to a collection so we can easily count the unique ones
+    For Each Recipient In Item.Recipients
+          parts = Split(Recipient.Address, "@")
+          If UBound(parts) = 1 And parts(1) <> ownDomainName Then
+            '' if already present then error handling will ignore the error
+            domains.Add parts(1)
+          End If
+    Next
+    
+    If domains.Count > 1 Then
+        Dim externalDomains, message, answer As String
+        For Each domain In domains
+            externalDomains = externalDomains + " " + domain
+        Next
+        
+        message = "This email is being sent to " + CStr(domains.Count) + " different external domains:" + vbCrLf + vbCrLf + externalDomains + vbCrLf + vbCrLf + "Continue?"
+        answer = MsgBox(message, vbExclamation + vbYesNo, "Multiple Recipient Domains Detected")
+        If answer <> vbYes Then
+            Cancel = True
+        End If
+    End If
+    
+    Set olNS = Nothing
+    Set olApp = Nothing
+End Sub
