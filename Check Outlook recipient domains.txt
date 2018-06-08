@@ -14,7 +14,7 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
     Set olApp = CreateObject("Outlook.Application")
     Set olNS = olApp.GetNamespace("MAPI")
     
-    '' Find the domain name for the account sendinf the email (may be Exchange so can't use Sender property
+    '' Find the domain name for the account sending the email (may be Exchange so can't use Sender property
     For Each Account In olNS.Accounts
         parts = Split(Account.SmtpAddress, "@")
         If UBound(parts) = 1 Then
@@ -34,15 +34,21 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
     Dim domains As Collection
     Set domains = New Collection
     
-    '' to hide error if item added to collection is already present
+    '' to hide error if item not added to collection that we try to index via domain key
     On Error Resume Next
     
     '' add all domain names which aren't the same as the senders to a collection so we can easily count the unique ones
     For Each Recipient In Item.Recipients
           parts = Split(Recipient.Address, "@")
           If UBound(parts) = 1 And parts(1) <> ownDomainName Then
-            '' if already present then error handling will ignore the error
-            domains.Add parts(1)
+            existing = ""
+            If domains.Count > 0 Then
+                '' if not present then error handling will ignore the error
+                existing = domains(parts(1))
+            End If
+            If existing = "" Then
+                domains.Add parts(1), parts(1)
+            End If
           End If
     Next
     
