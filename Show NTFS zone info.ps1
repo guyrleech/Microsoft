@@ -7,6 +7,10 @@
     Pipe to Out-GridView or Export-Csv
 
     @guyrleech 2018
+
+    Modification History:
+
+    02/08/18  GRL  Added created and modified times and file owner
 #>
 
 <#
@@ -87,7 +91,15 @@ Get-ChildItem @params -File | ForEach-Object `
             $HostURL = $zoneInfo | Where-Object { $_ -match '^HostURL=(.*)$' } | ForEach-Object { $matches[1] }
             if( ! $webOnly -or ( ! [string]::IsNullOrEmpty( $ReferrerURL ) -and $ReferrerURL -match '^https?:' ) -or ( ! [string]::IsNullOrEmpty( $HostURL ) -and $HostURL -match '^https?:' ) )
             {
-                [pscustomobject]@{ 'File' = $_.FullName ; 'Zone' = $zones[ $zone ] ; 'Referrer URL' = $ReferrerURL ; 'Host URL' = $HostURL }
+                [pscustomobject]@{
+                    'File' = $_.FullName ; 
+                    'Zone' = $zones[ $zone ] ; 
+                    'Referrer URL' = $ReferrerURL ; 
+                    'Host URL' = $HostURL ; 
+                    'Created' = $_.CreationTime ; 
+                    'Modified' = $_.LastWriteTime ; 
+                    'Owner' = ( Get-Acl -Path $_.FullName | Select -ExpandProperty Owner ) ;
+                    'Size (KB)' = [int]( $_.Length / 1KB ) }
             }
         }
     }
