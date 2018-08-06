@@ -1,8 +1,8 @@
 ﻿#requires -version 3.0
 <#
-    Find files with Zone.Identifier NTFS alternate data stream and show the content
+    Find/remove files with Zone.Identifier NTFS alternate data stream and show the content
 
-    This is how files are marked by Windows when they have come from an "untrusted" source
+    This is how files are marked by certain browsers on Windows 10 when they have come from an "untrusted" source
 
     Pipe to Out-GridView or Export-Csv
 
@@ -11,6 +11,7 @@
     Modification History:
 
     02/08/18  GRL  Added created and modified times and file owner
+    06/08/18  GRL  Added remove and scrub options
 #>
 
 <#
@@ -30,6 +31,14 @@ Recurse the folder structure
 
 Only show files which have come from the web
 
+.PARAMETER remove
+
+Remove the alternate data stream completely
+
+.PARAMETER scrub
+
+Remove the URL information from the alternate data stream, leaving just the zone information
+
 .EXAMPLE
 
 & '.\Show NTFS zone info.ps1' -path C:\Temp
@@ -39,6 +48,10 @@ Show all files in the c:\temp folder which have Zone.Identifier information atta
 & '.\Show NTFS zone info.ps1' -path C:\users -Recurse -WebOnly | Out-GridView
 
 Show all files in the c:\users folder and sub folders which have Zone.Identifier information attached which have come from the web
+
+& '.\Show NTFS zone info.ps1' -path C:\users -Recurse -WebOnly -Scrub | Out-Null
+
+Remove the URL information from all Zone.Identifier alternate data streams on files in the c:\users folder and sub folders
 
 .NOTES
 
@@ -55,6 +68,8 @@ Param
     [string]$path ,
     [switch]$recurse ,
     [switch]$webOnly ,
+    [switch]$remove ,
+    [switch]$scrub ,
     [string]$zoneStream = 'Zone.Identifier'
 )
 
@@ -83,7 +98,7 @@ Get-ChildItem @params -File | ForEach-Object `
 { 
     try
     {
-        $zoneInfo = Get-Content $_.FullName -Stream $zoneStream -ErrorAction SilentlyContinue 
+        $zoneInfo = Get-Content -Path $_.FullName -Stream $zoneStream -ErrorAction SilentlyContinue 
         if( $zoneInfo )
         {
             $zone = $zoneInfo | Where-Object { $_ -match '^ZoneId=(.*)$' } | ForEach-Object { $matches[1] }
@@ -100,6 +115,17 @@ Get-ChildItem @params -File | ForEach-Object `
                     'Modified' = $_.LastWriteTime ; 
                     'Owner' = ( Get-Acl -Path $_.FullName | Select -ExpandProperty Owner ) ;
                     'Size (KB)' = [int]( $_.Length / 1KB ) }
+                
+                if( $remove )
+                {
+                    Remove-Item -Path $_.FullName -Stream $zoneStream
+                }
+                elseif( $scrub )
+                {
+                    $lastModified = $_.LastWriteTime
+                    $zoneInfo | Select-String -NotMatch 'URL=' | Set-Content -Path $_.FullName -Stream $zoneStream
+                    $_.LastWriteTime = $lastModified
+                }
             }
         }
     }
