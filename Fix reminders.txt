@@ -1,0 +1,68 @@
+
+'' Find future Outlook calendar items without reminders and add them
+'' This macro, which can easily be added to the Outlook ribbon for easy invocation, will find all non-all day appointments in the future which don't have reminders set, prompt you for what reminder period to set (in minutes) and then set that reminder on all appointments currently without reminders.
+'' To install, add to the ThisOutlookSession module in the VBA window in Outlook which can be launched by pressing Alt+F11. Once added, quit Outlook to ensure it is saved. You may need to change your macro security settings in Outlook's Trust Center in order to allow it to run.
+'' Guy Leech, 2018
+''
+'' Use at your own risk. No warranty supplied.
+
+Public Sub Fix_Reminderless()
+    Dim olAppointment As Outlook.AppointmentItem
+    Dim present As Date
+    Dim strFilter As String
+    Dim olApp As Outlook.Application
+    Dim olNS As Outlook.NameSpace
+    Dim olRecItems As Outlook.Folder
+    Dim olFilterRecItems As Outlook.Items
+    
+    Set olApp = CreateObject("Outlook.Application")
+    Set olNS = olApp.GetNamespace("MAPI")
+    
+    Set olRecItems = olNS.GetDefaultFolder(olFolderCalendar)
+    present = Now
+    strFilter = "[Start] >= '" & Format(present, "ddddd h:nn AMPM") & "'"  '' This should be locale neutral
+    Set olFilterRecItems = olRecItems.Items.Restrict(strFilter)
+
+    Debug.Print "Got ", olRecItems.Items.Count, " total appointments with filter """, strFilter, """"
+    Debug.Print "Got ", olFilterRecItems.Count, " filtered appointments"
+        
+    Dim iFixed, iDefaultReminder As Integer
+    Dim strFixed, strAnswer As String
+    
+    iFixed = 0
+    iDefaultReminder = 0
+    iTotal = 0
+    
+    ' Two passes - first to count so we can report how many there are
+    For Each olAppointment In olFilterRecItems
+        If Not olAppointment.ReminderSet And Not olAppointment.AllDayEvent Then
+           iTotal = iTotal + 1
+        End If
+    Next
+    
+    Debug.Print "Got ", iTotal, " appointments to fix"
+    
+    For Each olAppointment In olFilterRecItems
+        If Not olAppointment.ReminderSet And Not olAppointment.AllDayEvent Then
+            Debug.Print olAppointment.Start, olAppointment.Subject
+            While iDefaultReminder = 0
+                strAnswer = InputBox("Enter reminder time in minutes", "Set default reminder time for " & iTotal & " events", 10)
+                If Len(strAnswer) = 0 Then GoTo EndIt:
+                If IsNumeric(strAnswer) Then iDefaultReminder = CInt(strAnswer)
+            Wend
+            olAppointment.ReminderSet = True
+            olAppointment.ReminderMinutesBeforeStart = iDefaultReminder
+            olAppointment.Save
+            iFixed = iFixed + 1
+            strFixed = strFixed & Chr(13) & olAppointment.Start & " - " & olAppointment.Subject
+        End If
+    Next
+    
+EndIt:
+    MsgBox "Changed " & iFixed & " appointments:" & Chr(13) & strFixed
+End Sub
+
+Private Sub Application_Startup()
+    
+End Sub
+
