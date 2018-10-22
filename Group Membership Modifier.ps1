@@ -5,6 +5,8 @@
     @guyrleech (c) 2018
 
     Modification history:
+
+    22/10/18   GRL   Added support for local accounts
 #>
 
 <#
@@ -61,7 +63,7 @@ The user running the script must have the rights to perform the group changes ot
 
 Param
 (
-    [string[]]$machines = @() ,
+    [string[]]$machines = @( 'localhost' ) ,
     [string]$machinesFile ,
     [string[]]$users ,
     [string]$usersFile ,
@@ -80,12 +82,17 @@ if( ! [string]::IsNullOrEmpty( $usersFile ) )
     $users += Get-Content $usersFile -ErrorAction Stop
 }
 
+if( ! $machines -or ! $machines.Count )
+{
+    Throw "No machines specified to operate on"
+}
+
 [int]$missingUsers = 0
 
 [array]$adUsers = 
     @( ForEach( $user in $users )
     {
-        if( $user -match '^[\- _a-z0-9]' )
+        if( $user -match '^[\- _a-z0-9\.]' )
         {
             [string]$domainName,[string]$userName = $user.Trim() -split '\\'
 
@@ -93,6 +100,10 @@ if( ! [string]::IsNullOrEmpty( $usersFile ) )
             {
                 $userName = $domainName
                 $domainName = $domain
+            }
+            elseif( $domainName -eq '.' )
+            {
+                $domainName = $env:COMPUTERNAME
             }
             $thisUser = [ADSI]"WinNT://$domainName/$userName,user"
             if( ! $thisUser.Path )
@@ -104,6 +115,10 @@ if( ! [string]::IsNullOrEmpty( $usersFile ) )
             {
                 $thisUser
             }
+        }
+        else
+        {
+            Write-Warning "Unexpected format for user `"$user`" - either use domain\ , .\ or just the user name"
         }
     })
 
