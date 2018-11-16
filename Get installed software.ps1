@@ -5,6 +5,10 @@
     Based on code from https://blogs.technet.microsoft.com/heyscriptingguy/2011/11/13/use-powershell-to-quickly-find-installed-software/
 
     @guyrleech, November 2018
+
+    Modification History:
+
+    16/11/18   GRL   Added functionality to uninstall items selected in grid view
 #>
 
 <#
@@ -27,6 +31,10 @@ The name and optional path to a non-existent csv file which will have the result
 .PARAMETER gridview
 
 The output will be presented in an on screen filterable/sortable grid view. Lines selected when OK is clicked will be placed in the clipboard
+
+.PARAMETER uninstall
+
+Run the uninstaller defined for each item selected in the gridview after OK is clicked. Will only run uninstallers for packages selected on the local computer
 
 .PARAMETER importcsv
 
@@ -60,7 +68,7 @@ Retrieve installed software details on computers in the CSV file computers.csv i
 
 #>
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='High')]
 
 Param
 (
@@ -72,10 +80,16 @@ Param
     [string]$importcsv ,
     [Parameter(Mandatory=$false, ParameterSetName = "ComputerCSV")]
     [string]$computerColumnName = 'ComputerName' ,
+    [switch]$uninstall ,
     [switch]$includeEmptyDisplayNames
 )
 
 [string[]]$UninstallKeys = @( 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall' , 'SOFTWARE\\wow6432node\\Microsoft\\Windows\\CurrentVersion\\Uninstall' )
+
+if( $uninstall -and ! $gridview )
+{
+    Throw 'Can only use -uninstall when -gridview is used too'
+}
 
 if( ! [string]::IsNullOrEmpty( $importcsv ) )
 {
@@ -185,6 +199,8 @@ if( ! $computers -or $computers.Count -eq 0 )
     }
 } ) | Sort -Property ComputerName, DisplayName
 
+[int]$uninstalled = 0
+
 if( $installed -and $installed.Count )
 {
     Write-Verbose "Found $($installed.Count) installed items on $($computers.Count) computers"
@@ -195,10 +211,78 @@ if( $installed -and $installed.Count )
     }
     if( $gridView )
     {
-        $selected = $installed | Out-GridView -Title "$($installed.Count) installed items on $($computers.Count) computers" -PassThru
-        if( $selected )
+        $packages = $installed | Out-GridView -Title "$($installed.Count) installed items on $($computers.Count) computers" -PassThru
+        if( $packages )
         {
-            $selected | Set-Clipboard
+            if( $uninstall )
+            {
+                ForEach( $package in $packages )
+                {
+                    
+                    if( $package.ComputerName -eq $env:COMPUTERNAME )
+                    {
+                        if( ! [string]::IsNullOrEmpty( $package.Uninstall ) )
+                        {
+                            if( $PSCmdlet.ShouldProcess( $package.DisplayName , "Remove package from $($package.DisplayName)" ) )
+                            {
+                                ## need to split uninstall line so we can pass to Start-Process
+                                [string]$executable = $null
+                                [string]$arguments = $null
+                                if( $package.Uninstall -match '^"([^"]*)"\s+(.*)$' )
+                                {
+                                    $executable = $Matches[1]
+                                    $arguments = $Matches[2]
+                                }
+                                else ## unquoted so see if there's a space delimiting exe and arguments
+                                {
+                                    [int]$space = $package.Uninstall.IndexOf( ' ' )
+                                    if( $space -lt 0 )
+                                    {
+                                        $executable = $package.Uninstall
+                                    }
+                                    else
+                                    {
+                                        $executable = $package.Uninstall.SubString( 0 , $space )
+                                        if( $space -lt $package.Uninstall.Length - 1 )
+                                        {
+                                            $arguments = $package.Uninstall.SubString( $space + 1 )
+                                        }
+                                    }
+                                }
+                                Write-Verbose "Running $executable `"$arguments`" for $($package.DisplayName) ..."
+                                [hashtable]$processArguments = @{
+                                    'FilePath' = $executable
+                                    'PassThru' = $true
+                                    'Wait' = $true
+                                }
+                                if( ! [string]::IsNullOrEmpty( $arguments ) )
+                                {
+                                    $processArguments.Add( 'ArgumentList' , $arguments )
+                                }
+                                $uninstallProcess = Start-Process @processArguments
+                                if( $uninstallProcess )
+                                {
+                                    Write-Verbose "Uninstall exited with code $($uninstallProcess.ExitCode)"
+                                    $uninstalled++
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Write-Warning "Unable to uninstall `"$($package.DisplayName)`" as it has no uninstall string"
+                        }
+                    }
+                    else
+                    {
+                        Write-Warning "Unable to uninstall `"$($package.DisplayName)`" as it is on $($package.ComputerName) and may not be silent"
+                    }
+                }
+                Write-Verbose "Successfully uninstalled $uninstalled packages"
+            }
+            else
+            {
+                $packages | Set-Clipboard
+            }
         }
     }
     else
