@@ -223,15 +223,16 @@ if( $installed -and $installed.Count )
                     {
                         if( ! [string]::IsNullOrEmpty( $package.Uninstall ) )
                         {
-                            if( $PSCmdlet.ShouldProcess( $package.DisplayName , "Remove package from $($package.DisplayName)" ) )
+                            if( $PSCmdlet.ShouldProcess( $package.DisplayName , "Remove package" ) )
                             {
-                                ## need to split uninstall line so we can pass to Start-Process
+                                ## need to split uninstall line so we can pass to Start-Process since we need to wait for each to finish in turn
                                 [string]$executable = $null
                                 [string]$arguments = $null
-                                if( $package.Uninstall -match '^"([^"]*)"\s+(.*)$' )
+                                if( $package.Uninstall -match '^"([^"]*)"\s?(.*)$' `
+                                    -or $package.Uninstall -match '^(.*\.exe)\s?(.*)$' ) ## cope with spaces in path but no quotes
                                 {
                                     $executable = $Matches[1]
-                                    $arguments = $Matches[2]
+                                    $arguments = $Matches[2].Trim()
                                 }
                                 else ## unquoted so see if there's a space delimiting exe and arguments
                                 {
@@ -243,9 +244,9 @@ if( $installed -and $installed.Count )
                                     else
                                     {
                                         $executable = $package.Uninstall.SubString( 0 , $space )
-                                        if( $space -lt $package.Uninstall.Length - 1 )
+                                        if( $space -lt $package.Uninstall.Length )
                                         {
-                                            $arguments = $package.Uninstall.SubString( $space + 1 )
+                                            $arguments = $package.Uninstall.SubString( $space ).Trim()
                                         }
                                     }
                                 }
@@ -277,7 +278,7 @@ if( $installed -and $installed.Count )
                         Write-Warning "Unable to uninstall `"$($package.DisplayName)`" as it is on $($package.ComputerName) and may not be silent"
                     }
                 }
-                Write-Verbose "Successfully uninstalled $uninstalled packages"
+                Write-Verbose "Successfully ran uninstaller for $uninstalled packages"
             }
             else
             {
