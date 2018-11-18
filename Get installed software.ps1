@@ -6,9 +6,15 @@
 
     @guyrleech, November 2018
 
+    THIS SCRIPT COMES WITH ABSOLUTELY NO WARRANTY AND THE AUTHOR CANNOT BE HELD RESPONSIBLE FOR ANY DAMAGE CAUSED BY IT OR ITS ACTIONS. USE ENTIRELY AT YOUR OWN RISK.
+
     Modification History:
 
     16/11/18   GRL   Added functionality to uninstall items selected in grid view
+
+    18/11/18   GRL   Added -remove to remove one or more packages without needing grid view display
+                     Added -silent to run silent uninstalls where installer is msiexec
+                     Added -quiet option
 #>
 
 <#
@@ -35,6 +41,14 @@ The output will be presented in an on screen filterable/sortable grid view. Line
 .PARAMETER uninstall
 
 Run the uninstaller defined for each item selected in the gridview after OK is clicked. Will only run uninstallers for packages selected on the local computer
+
+.PARAMETER remove
+
+Comma separated list of one or more package names, or regular expressions that mach one or more package names, that will be uninstalled.
+
+.PARAMETER silent
+
+Try and run the uninstall silently. This only works where the uninstall program is msiexec.exe
 
 .PARAMETER importcsv
 
@@ -66,6 +80,24 @@ Retrieve installed software details on the computers computer1, computer2 and co
 
 Retrieve installed software details on computers in the CSV file computers.csv in the current directory where the column name "Machine" contains the name of the computer and write the results to standard output
 
+.EXAMPLE
+
+& '.\Get installed software.ps1' -gridview -computers . -uninstall
+
+Retrieve installed software details on the local computer and show in a grid view. Packages selected after OK is clicked in the grid view will be uninstalled.
+
+.EXAMPLE
+
+& '.\Get installed software.ps1' -computers . -remove '7\-zip','Notepad\+\+' -Confirm:$false
+
+Retrieve installed software details on the local computer and and remove 7-Zip and Notepad++ without asking for confirmation.
+
+.EXAMPLE
+
+& '.\Get installed software.ps1' -computers . -remove 'Acrobat Reader' -Confirm:$false -silent
+
+Retrieve installed software details on the local computer and and remove Adobe Acrobat Reader silently, so without any user prompts, and without asking for confirmation.
+
 #>
 
 [CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='High')]
@@ -81,14 +113,139 @@ Param
     [Parameter(Mandatory=$false, ParameterSetName = "ComputerCSV")]
     [string]$computerColumnName = 'ComputerName' ,
     [switch]$uninstall ,
+    [string[]]$remove ,
+    [switch]$silent ,
+    [switch]$quiet ,
     [switch]$includeEmptyDisplayNames
 )
+
+Function Remove-Package()
+{
+    [CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='High')]
+    Param
+    (
+        $package ,
+        [switch]$silent
+    )
+
+    [bool]$uninstallerRan = $false
+
+    if( $package.ComputerName -eq $env:COMPUTERNAME )
+    {
+        Write-Verbose "Removing `"$($package.DisplayName)`" ..."
+
+        if( ! [string]::IsNullOrEmpty( $package.Uninstall ) )
+        {
+            if( $PSCmdlet.ShouldProcess( $package.DisplayName , "Remove package" ) )
+            {
+                ## need to split uninstall line so we can pass to Start-Process since we need to wait for each to finish in turn
+                [string]$executable = $null
+                [string]$arguments = $null
+                if( $package.Uninstall -match '^"([^"]*)"\s?(.*)$' `
+                    -or $package.Uninstall -match '^(.*\.exe)\s?(.*)$' ) ## cope with spaces in path but no quotes
+                {
+                    $executable = $Matches[1]
+                    $arguments = $Matches[2].Trim()
+                }
+                else ## unquoted so see if there's a space delimiting exe and arguments
+                {
+                    [int]$space = $package.Uninstall.IndexOf( ' ' )
+                    if( $space -lt 0 )
+                    {
+                        $executable = $package.Uninstall
+                    }
+                    else
+                    {
+                        $executable = $package.Uninstall.SubString( 0 , $space )
+                        if( $space -lt $package.Uninstall.Length )
+                        {
+                            $arguments = $package.Uninstall.SubString( $space ).Trim()
+                        }
+                    }
+                }
+                [hashtable]$processArguments = @{
+                    'FilePath' = $executable
+                    'PassThru' = $true
+                    'Wait' = $true
+                }
+                if( $silent )
+                {
+                    if( $executable -match '^msiexec\.exe$' -or $executable -match '^msiexec$' -or $executable -match '[^a-z0-9_]msiexec\.exe$' -or $executable -match '[^a-z0-9_]msiexec$' )
+                    {
+                        ## Some uninstallers pass /I as they are meant to be interactive so we'll change this to /X
+                        $arguments = ($arguments -replace '/I' , '/X') + ' /qn /norestart'
+                    }
+                    else
+                    {
+                        Write-Warning "Don't know how to run silent uninstall for package `"$($package.DisplayName)`", uninstaller `"$executable`""
+                    }
+                }
+                if( ! [string]::IsNullOrEmpty( $arguments ) )
+                {
+                    $processArguments.Add( 'ArgumentList' , $arguments )
+                }
+                Write-Verbose "Running $executable `"$arguments`" for $($package.DisplayName) ..."
+                $uninstallProcess = Start-Process @processArguments
+                if( ( Get-Variable -Name 'uninstallProcess' -ErrorAction SilentlyContinue ) -and $uninstallProcess ) ## catch where user declined UAC elevation
+                {
+                    Write-Verbose "Uninstall exited with code $($uninstallProcess.ExitCode)"
+                    ## https://docs.microsoft.com/en-us/windows/desktop/Msi/error-codes
+                    if( $uninstallProcess.ExitCode -eq 3010 ) ## maybe should check it's msiexec that ran
+                    {
+                        Write-Warning "Uninstall of `"$($package.DisplayName)`" requires a reboot"
+                    }
+                    $uninstallerRan = $true
+                }
+            }
+        }
+        else
+        {
+            Write-Warning "Unable to uninstall `"$($package.DisplayName)`" as it has no uninstall string"
+        }
+    }
+    else
+    {
+        Write-Warning "Unable to uninstall `"$($package.DisplayName)`" as it is on $($package.ComputerName) and may not be silent"
+    }
+
+    $uninstallerRan
+}
+
+if( $quiet )
+{
+    $VerbosePreference = $WarningPreference = 'SilentlyContinue'
+}
 
 [string[]]$UninstallKeys = @( 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall' , 'SOFTWARE\\wow6432node\\Microsoft\\Windows\\CurrentVersion\\Uninstall' )
 
 if( $uninstall -and ! $gridview )
 {
     Throw 'Can only use -uninstall when -gridview is used too'
+}
+
+if( $remove -and $remove.Count )
+{
+    if( $gridview )
+    {
+        Throw 'Can only use -remove when -gridview is not used'
+    }
+    [string[]]$invalids = @()
+    ForEach( $removal in $remove )
+    {
+        try
+        {
+            $null = $null -match $removal
+        }
+        catch
+        {
+            $invalids += $_.Exception.Message
+        }
+    }
+
+    if( $invalids -and $invalids.Count )
+    {
+        Throw "There were $($invalids.Count) -remove arguments which were invalid regular expressions:`n`tError $($invalids -join "`n`tError ")"
+    }
 }
 
 if( ! [string]::IsNullOrEmpty( $importcsv ) )
@@ -217,73 +374,38 @@ if( $installed -and $installed.Count )
             if( $uninstall )
             {
                 ForEach( $package in $packages )
-                {
-                    
-                    if( $package.ComputerName -eq $env:COMPUTERNAME )
+                {                 
+                    if( Remove-Package -Package $package -silent:$silent )
                     {
-                        if( ! [string]::IsNullOrEmpty( $package.Uninstall ) )
-                        {
-                            if( $PSCmdlet.ShouldProcess( $package.DisplayName , "Remove package" ) )
-                            {
-                                ## need to split uninstall line so we can pass to Start-Process since we need to wait for each to finish in turn
-                                [string]$executable = $null
-                                [string]$arguments = $null
-                                if( $package.Uninstall -match '^"([^"]*)"\s?(.*)$' `
-                                    -or $package.Uninstall -match '^(.*\.exe)\s?(.*)$' ) ## cope with spaces in path but no quotes
-                                {
-                                    $executable = $Matches[1]
-                                    $arguments = $Matches[2].Trim()
-                                }
-                                else ## unquoted so see if there's a space delimiting exe and arguments
-                                {
-                                    [int]$space = $package.Uninstall.IndexOf( ' ' )
-                                    if( $space -lt 0 )
-                                    {
-                                        $executable = $package.Uninstall
-                                    }
-                                    else
-                                    {
-                                        $executable = $package.Uninstall.SubString( 0 , $space )
-                                        if( $space -lt $package.Uninstall.Length )
-                                        {
-                                            $arguments = $package.Uninstall.SubString( $space ).Trim()
-                                        }
-                                    }
-                                }
-                                Write-Verbose "Running $executable `"$arguments`" for $($package.DisplayName) ..."
-                                [hashtable]$processArguments = @{
-                                    'FilePath' = $executable
-                                    'PassThru' = $true
-                                    'Wait' = $true
-                                }
-                                if( ! [string]::IsNullOrEmpty( $arguments ) )
-                                {
-                                    $processArguments.Add( 'ArgumentList' , $arguments )
-                                }
-                                $uninstallProcess = Start-Process @processArguments
-                                if( $uninstallProcess )
-                                {
-                                    Write-Verbose "Uninstall exited with code $($uninstallProcess.ExitCode)"
-                                    $uninstalled++
-                                }
-                            }
-                        }
-                        else
-                        {
-                            Write-Warning "Unable to uninstall `"$($package.DisplayName)`" as it has no uninstall string"
-                        }
-                    }
-                    else
-                    {
-                        Write-Warning "Unable to uninstall `"$($package.DisplayName)`" as it is on $($package.ComputerName) and may not be silent"
+                        $uninstalled++
                     }
                 }
-                Write-Verbose "Successfully ran uninstaller for $uninstalled packages"
             }
             else
             {
                 $packages | Set-Clipboard
             }
+        }
+    }
+    elseif( $remove -and $remove.Count )
+    {
+        [int]$matched = 0
+        ForEach( $removal in $remove )
+        {
+            $removed = $installed | Where-Object { $_.DisplayName -match $removal } | ForEach-Object `
+            {
+                $matched++
+                if( Remove-Package -Package $_ -silent:$silent )
+                {
+                    $uninstalled++
+                    $_
+                }
+            }
+        }
+        Write-Verbose "Ran uninstaller for $uninstalled packages for $matched matches"
+        if( ! $matched )
+        {
+            Write-Warning "No unistallers were run as no packages specified in -remove matched"
         }
     }
     else
