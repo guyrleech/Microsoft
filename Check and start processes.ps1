@@ -4,6 +4,11 @@
     Can be used to launch and monitor key apps like Outlook and Skype for Business (Lync)
 
     @guyrleech 2018
+
+    Modification History:
+
+    03/12/18   GRL  Added -silent switch
+                    Bugfix of overwrite of $process loop variable
 #>
 
 <#
@@ -27,6 +32,10 @@ Automatically launch any missing process without prompting
 .PARAMETER ignoreFirst
 
 Ignore the first instance of a missing process. Useful if something else is going to start the process
+
+.PARAMETER silent
+
+Do not report any errors to user
 
 .PARAMETER install
 
@@ -79,6 +88,7 @@ Param
     [switch]$install ,
     [switch]$uninstall ,
     [switch]$allUsers ,
+    [switch]$silent ,
     [int]$checkPeriod = 300 ,
     [int]$startDelay = 0 ,
     [string]$delimiter = ';' ,
@@ -106,6 +116,10 @@ if( $install )
     if( $ignoreFirst )
     {
         $valueData += ' -ignoreFirst'
+    }
+    if( $silent )
+    {
+        $valueData += ' -silent'
     }
     Set-ItemProperty -Path $runKey -Name $valueName -Value $valueData -ErrorAction Stop
     Exit $?
@@ -169,12 +183,12 @@ do
                         $pinfo.UseShellExecute = $true
                         $pinfo.WindowStyle = 'Normal'
                         $pinfo.CreateNoWindow = $false
-                        $process = New-Object System.Diagnostics.Process
-                        $process.StartInfo = $pinfo
+                        $newProcess = New-Object System.Diagnostics.Process
+                        $newProcess.StartInfo = $pinfo
                         $launched = $null
                         try
                         {
-                            $launched = $process.Start()
+                            $launched = $newProcess.Start()
                         }
                         catch
                         {
@@ -183,7 +197,10 @@ do
                         }
                         if( ! $launched )
                         {
-                            [void][Microsoft.VisualBasic.Interaction]::MsgBox( "Failed to launch $($pinfo.FileName) $($pinfo.Arguments) - $($Error[0].Exception.Message)" , 'OKOnly,SystemModal,Exclamation' , $scriptName )
+                            if( ! $silent )
+                            {
+                                [void][Microsoft.VisualBasic.Interaction]::MsgBox( "Failed to launch $($pinfo.FileName) $($pinfo.Arguments) - $($Error[0].Exception.Message)" , 'OKOnly,SystemModal,Exclamation' , $scriptName )
+                            }
                         }
                         else
                         {
@@ -191,7 +208,7 @@ do
                         }
                     }
                 }
-                else
+                elseif( ! $silent )
                 {
                     [void][Microsoft.VisualBasic.Interaction]::MsgBox( $message , 'OKOnly,SystemModal,Exclamation' , $scriptName )
                 }
