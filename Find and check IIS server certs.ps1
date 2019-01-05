@@ -2,6 +2,11 @@
     Find all IIS servers in the domain, optionally filtered by OU, Group and/or name, or contained in a text file, check IIS certificates and email results of soon to expire ones or write to file or grid view
 
     @guyrleech 2018
+
+    Modification History:
+
+    05/01/19  GRL  Added parameter to save discovered servers to text file
+                   Added -overwrite switch
 #>
 
 <#
@@ -16,6 +21,11 @@ Comma separated list of server names to check
 .PARAMETER serversFile
 
 A text file containing one server per line. Lines not starting with an alphanumeric character are ignored as are characters after a space to the end of the line
+
+.PARAMETER outputFile
+
+Write the names of servers where IIS is discovered, along with subject and expiry date of any IIS certificates found, to the named file. Fails if file exists unless -overwrite is specified
+The file can then be given to -serversFile for input so that only previously known IIS servers are queried.
 
 .PARAMETER serverLike
 
@@ -32,6 +42,10 @@ A comma separated list of Active Directory groups  whose members will be checked
 .PARAMETER csv
 
 Name of a non-existent CSV file which will be created with the list of soon to expire certificates
+
+.PARAMETER overwrite
+
+If the files specified via -csv or -outputFile already exist then they will fail to be written unless -overwrite is specified
 
 .PARAMETER gridView
 
@@ -123,6 +137,8 @@ Param
     [string[]]$OUs ,
     [string[]]$groups ,
     [string]$csv ,
+    [string]$outputFile ,
+    [switch]$overwrite ,
     [switch]$gridView,
     [switch]$emailIfNone ,
     [string]$mailserver ,
@@ -300,6 +316,9 @@ $servers = $servers | Sort -Unique
 
 Write-Verbose "Got $($servers.Count) computers to check: $($servers -join ',')"
 
+## Keep a list of servers so we can write it to a ttext file if requested
+$IISservers = New-Object -TypeName 'System.Collections.ArrayList'
+
 [array]$results = @( ForEach( $server in $servers )
 {
     $counter++
@@ -309,11 +328,14 @@ Write-Verbose "Got $($servers.Count) computers to check: $($servers -join ',')"
     if( $webService )
     {
         Write-Verbose "$server has IIS"
+        [string]$outputLine = "$server # "
         ## Now check for any expiring certificates within the window
         if( $IIScertificates -and $IIScertificates.Count )
         {
+            $outputLine += "$($IIScertificates.Count) certs "
             ForEach( $cert in $IIScertificates )
             {
+                $outputLine += " : `"$($cert.subject)`" $(Get-Date $cert.NotAfter -Format G)"
                 if( $cert.NotAfter -le $expiryDate )
                 {
                     Write-Warning "Cert from $server expires on $($cert.NotAfter)"
@@ -321,8 +343,15 @@ Write-Verbose "Got $($servers.Count) computers to check: $($servers -join ',')"
                 }
             }
         }
+        else
+        {
+            $outputLine += 'no IIS certs found'
+        }
+        [void]$IISservers.Add( $outputLine )
     }
 } )
+
+[hashtable]$clobber = @{ 'NoClobber' = (! $overwrite) }
 
 if( ! $results -or ! $results.Count )
 {
@@ -330,7 +359,12 @@ if( ! $results -or ! $results.Count )
 }
 elseif( ! [string]::IsNullOrEmpty( $csv ) )
 {
-    $results | Export-Csv -Path $csv -NoTypeInformation -NoClobber
+    $results | Export-Csv -Path $csv -NoTypeInformation @clobber
+}
+
+if( $IISservers -and $IISservers.Count -and ! [string]::IsNullOrEmpty( $outputFile ) )
+{
+    $IISservers | Out-File -FilePath $outputFile @clobber
 }
 
 if( $recipients -and $recipients.Count -and ! [string]::IsNullOrEmpty( $mailserver ) `
