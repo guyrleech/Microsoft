@@ -4,6 +4,10 @@ Create an exe that will crash so that memory dump capture can be tested
 Based on code at http://stekodyne.com/?p=11
 
 @guyrleech 2018
+
+Modification History:
+
+  09/01/2019  GRL  If any parameter passed to the compiled exe, it will crash without prompting
 #>
 
 [CmdletBinding()]
@@ -69,14 +73,18 @@ $csharp = @'
     { 
         static class Program 
         { 
-            static void Main() 
+            static void Main( string[] args ) 
             {   
-		        DialogResult result = MessageBox.Show( "Click OK to crash the application",
-			        "Wcrasher", MessageBoxButtons.OKCancel );
+                DialogResult result = 0 ;
+                if( args.Length == 0 )
+                {
+		            result = MessageBox.Show( "Click OK to crash the application",
+			            "Wcrasher", MessageBoxButtons.OKCancel );
+                }
                 unsafe
 		        {
 			        int *badptr = (int *)0 ;
-			        if( DialogResult.OK == result )
+			        if( args.Length > 0 || DialogResult.OK == result )
 			        {
 				        *badptr = 0xbad ;
 			        }
