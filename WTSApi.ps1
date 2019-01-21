@@ -8,6 +8,7 @@
 
     Modification History:
 
+    21/01/19  GRL Changed Get-WTSSessionInformation to take array of computer names
 #>
 
 Add-Type -ErrorAction Stop -TypeDefinition @'
@@ -139,7 +140,7 @@ Function Get-WTSSessionInformation
 
     Param
     (
-        [string]$computer = $null
+        [string[]]$computers = @( $null )
     )
 
     [long]$count = 0
@@ -148,61 +149,65 @@ Function Get-WTSSessionInformation
     [long]$ppBytesReturned = 0
     $wtsSessionInfo = New-Object -TypeName 'WTS_SESSION_INFO'
     $wtsInfoEx = New-Object -TypeName 'WTSINFOEX'
-    [string]$machineName = $(if( $computer ) { $computer } else { $env:COMPUTERNAME })
     [int]$datasize = [system.runtime.interopservices.marshal]::SizeOf( [Type]$wtsSessionInfo.GetType() )
-    [IntPtr]$serverHandle = [wtsapi]::WTSOpenServer( $computer )
 
-    ## If the function fails, it returns a handle that is not valid. You can test the validity of the handle by using it in another function call.
-
-    [long]$retval = [wtsapi]::WTSEnumerateSessions( $serverHandle , 0 , 1 , [ref]$ppSessionInfo , [ref]$count );$LastError = [ComponentModel.Win32Exception][Runtime.InteropServices.Marshal]::GetLastWin32Error()
-
-    if ($retval -ne 0)
+    ForEach( $computer in $computers )
     {
-         for ([int]$index = 0; $index -lt $count; $index++)
-         {
-             $element = [system.runtime.interopservices.marshal]::PtrToStructure( [long]$ppSessionInfo + ($datasize * $index), [type]$wtsSessionInfo.GetType())
-             if( $element -and $element.SessionID -ne 0 ) ## session 0 is non-interactive (session zero isolation)
+        [string]$machineName = $(if( $computer ) { $computer } else { $env:COMPUTERNAME })
+        [IntPtr]$serverHandle = [wtsapi]::WTSOpenServer( $computer )
+
+        ## If the function fails, it returns a handle that is not valid. You can test the validity of the handle by using it in another function call.
+
+        [long]$retval = [wtsapi]::WTSEnumerateSessions( $serverHandle , 0 , 1 , [ref]$ppSessionInfo , [ref]$count );$LastError = [ComponentModel.Win32Exception][Runtime.InteropServices.Marshal]::GetLastWin32Error()
+
+        if ($retval -ne 0)
+        {
+             for ([int]$index = 0; $index -lt $count; $index++)
              {
-                 $retval = [wtsapi]::WTSQuerySessionInformationW( $serverHandle , $element.SessionID , [WTS_INFO_CLASS]::WTSSessionInfoEx , [ref]$ppQueryInfo , [ref]$ppBytesReturned );$LastError = [ComponentModel.Win32Exception][Runtime.InteropServices.Marshal]::GetLastWin32Error()
-                 if( $retval -and $ppQueryInfo )
+                 $element = [system.runtime.interopservices.marshal]::PtrToStructure( [long]$ppSessionInfo + ($datasize * $index), [type]$wtsSessionInfo.GetType())
+                 if( $element -and $element.SessionID -ne 0 ) ## session 0 is non-interactive (session zero isolation)
                  {
-                    $value = [system.runtime.interopservices.marshal]::PtrToStructure( $ppQueryInfo , [Type]$wtsInfoEx.GetType())
-                    if( $value -and $value.Data -and $value.Data.WTSInfoExLevel1.SessionState -ne [WTS_CONNECTSTATE_CLASS]::WTSListen -and $value.Data.WTSInfoExLevel1.SessionState -ne [WTS_CONNECTSTATE_CLASS]::WTSConnected )
-                    {
-                        $wtsinfo = $value.Data.WTSInfoExLevel1
-                        $idleTime = New-TimeSpan -End ([datetime]::FromFileTimeUtc($wtsinfo.CurrentTime)) -Start ([datetime]::FromFileTimeUtc($wtsinfo.LastInputTime))
-                        Add-Member -InputObject $wtsinfo -Force -NotePropertyMembers @{
-                            'IdleTimeInSeconds' =  $idleTime | Select -ExpandProperty TotalSeconds
-                            'IdleTimeInMinutes' =  $idleTime | Select -ExpandProperty TotalMinutes
-                            'Computer' = $machineName
-                            'LogonTime' = [datetime]::FromFileTime( $wtsinfo.LogonTime )
-                            'DisconnectTime' = [datetime]::FromFileTime( $wtsinfo.DisconnectTime )
-                            'LastInputTime' = [datetime]::FromFileTime( $wtsinfo.LastInputTime )
-                            'ConnectTime' = [datetime]::FromFileTime( $wtsinfo.ConnectTime )
-                            'CurrentTime' = [datetime]::FromFileTime( $wtsinfo.CurrentTime )
+                     $retval = [wtsapi]::WTSQuerySessionInformationW( $serverHandle , $element.SessionID , [WTS_INFO_CLASS]::WTSSessionInfoEx , [ref]$ppQueryInfo , [ref]$ppBytesReturned );$LastError = [ComponentModel.Win32Exception][Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                     if( $retval -and $ppQueryInfo )
+                     {
+                        $value = [system.runtime.interopservices.marshal]::PtrToStructure( $ppQueryInfo , [Type]$wtsInfoEx.GetType())
+                        if( $value -and $value.Data -and $value.Data.WTSInfoExLevel1.SessionState -ne [WTS_CONNECTSTATE_CLASS]::WTSListen -and $value.Data.WTSInfoExLevel1.SessionState -ne [WTS_CONNECTSTATE_CLASS]::WTSConnected )
+                        {
+                            $wtsinfo = $value.Data.WTSInfoExLevel1
+                            $idleTime = New-TimeSpan -End ([datetime]::FromFileTimeUtc($wtsinfo.CurrentTime)) -Start ([datetime]::FromFileTimeUtc($wtsinfo.LastInputTime))
+                            Add-Member -InputObject $wtsinfo -Force -NotePropertyMembers @{
+                                'IdleTimeInSeconds' =  $idleTime | Select -ExpandProperty TotalSeconds
+                                'IdleTimeInMinutes' =  $idleTime | Select -ExpandProperty TotalMinutes
+                                'Computer' = $machineName
+                                'LogonTime' = [datetime]::FromFileTime( $wtsinfo.LogonTime )
+                                'DisconnectTime' = [datetime]::FromFileTime( $wtsinfo.DisconnectTime )
+                                'LastInputTime' = [datetime]::FromFileTime( $wtsinfo.LastInputTime )
+                                'ConnectTime' = [datetime]::FromFileTime( $wtsinfo.ConnectTime )
+                                'CurrentTime' = [datetime]::FromFileTime( $wtsinfo.CurrentTime )
+                            }
+                            $wtsinfo
                         }
-                        $wtsinfo
-                    }
-                    [wtsapi]::WTSFreeMemory( $ppQueryInfo )
-                    $ppQueryInfo = [IntPtr]::Zero
-                 }
-                 else
-                 {
-                    Write-Error $LastError
+                        [wtsapi]::WTSFreeMemory( $ppQueryInfo )
+                        $ppQueryInfo = [IntPtr]::Zero
+                     }
+                     else
+                     {
+                        Write-Error "$($machineName): $LastError"
+                     }
                  }
              }
-         }
-    }
-    else
-    {
-        Throw $LastError
-    }
+        }
+        else
+        {
+            Write-Error "$($machineName): $LastError"
+        }
 
-    if( $ppSessionInfo -ne [IntPtr]::Zero )
-    {
-        [wtsapi]::WTSFreeMemory( $ppSessionInfo )
-        $ppSessionInfo = [IntPtr]::Zero
+        if( $ppSessionInfo -ne [IntPtr]::Zero )
+        {
+            [wtsapi]::WTSFreeMemory( $ppSessionInfo )
+            $ppSessionInfo = [IntPtr]::Zero
+        }
+        [wtsapi]::WTSCloseServer( $serverHandle )
+        $serverHandle = [IntPtr]::Zero
     }
-    [wtsapi]::WTSCloseServer( $serverHandle )
-    $serverHandle = [IntPtr]::Zero
 }
