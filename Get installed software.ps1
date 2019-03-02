@@ -15,6 +15,7 @@
     18/11/18   GRL   Added -remove to remove one or more packages without needing grid view display
                      Added -silent to run silent uninstalls where installer is msiexec
                      Added -quiet option
+    02/03/19   GRL   Added SystemComponent value
 #>
 
 <#
@@ -327,6 +328,7 @@ if( ! $computers -or $computers.Count -eq 0 )
                             'Publisher' = $($thisSubKey.GetValue('Publisher'))
                             'InstallDate' = $installedOn
                             'Size (MB)' = $size
+                            'System Component' = $($thisSubKey.GetValue('SystemComponent') -eq 1)
                             'Comments' = $($thisSubKey.GetValue('Comments'))
                             'Contact' = $($thisSubKey.GetValue('Contact'))
                             'HelpLink' = $($thisSubKey.GetValue('HelpLink'))
