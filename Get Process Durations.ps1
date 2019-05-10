@@ -7,6 +7,7 @@
     Modification History:
 
     10/05/2019  GRL   Added subject logon id to grid view output
+                      Added enable/disable of process creatiuon and termination auditing
 #>
 
 <#
@@ -42,6 +43,14 @@ Include the logon time and the time since logon for the process creation for the
 
 Include the boot time and the time since boot for the process creation 
 
+.PARAMETER enable
+
+Enable process creation and termination auditing
+
+.PARAMETER disable
+
+Disable process creation and termination auditing
+
 .PARAMETER outputFile
 
 Write the results to the specified csv file
@@ -60,11 +69,19 @@ Do not include processes run by the system account
 
 Find all process creations and corresponding terminations for the user billybob in the last 2 days, calculate the start time relative to logon for that user's session and relative to the the boot time and display in a grid view
 
+.EXAMPLE
+
+& '.\Get Process Durations.ps1' -enable
+
+Enable process creation and termination auditing
+
 .NOTES
 
-Must have process creation and process termination auditing enabled.
+Must have process creation and process termination auditing enabled although this script can enable/disable if required
 
 If process command line auditing is enabled then the command line will be included. See https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
+
+Enable/Disable of auditing will not work in non-English locales
 #>
 
 [CmdletBinding()]
@@ -78,6 +95,8 @@ Param
     [string]$last ,
     [switch]$logon ,
     [switch]$boot ,
+    [switch]$enable ,
+    [switch]$disable ,
     [string]$outputFile ,
     [switch]$nogridview ,
     [switch]$excludeSystem 
@@ -130,6 +149,35 @@ Function Get-AuditSetting
     {
         Write-Warning "Unable to determine audit setting"
     }
+}
+
+if( $enable -and $disable )
+{
+    Throw 'Cannot enable and disable in same call'
+}
+
+if( $enable -or $disable )
+{
+    [hashtable]$requiredAuditEvents = @{
+        'Process Creation'    = '0cce922b-69ae-11d9-bed3-505054503030'
+        'Process Termination' = '0cce922c-69ae-11d9-bed3-505054503030'
+    }
+
+    [string]$state = $(if( $enable ) { 'Enable' } else { 'Disable' })
+
+    [int]$errors = 0
+
+    ForEach( $requiredAuditEvent in $requiredAuditEvents.GetEnumerator() )
+    {
+        $process = Start-Process -FilePath auditpol.exe -ArgumentList "/set /subcategory:{$($requiredAuditEvent.Value)} /success:$state" -Wait -WindowStyle Hidden -PassThru
+        if( ! $process -or $process.ExitCode )
+        {
+            Write-Error "Error running auditpol.exe to set $($requiredAuditEvent.Name) auditing to $state - error $($process|Select-Object -ExpandProperty ExitCode)"
+            $errors++
+        }
+    }
+
+    Exit $errors
 }
 
 [string]$machineAccount = $env:COMPUTERNAME + '$'
