@@ -6,6 +6,7 @@
 
     Modification History:
 
+    10/05/2019  GRL   Added subject logon id to grid view output
 #>
 
 <#
@@ -163,7 +164,7 @@ if( ! [string]::IsNullOrEmpty( $last ) )
     }
     else
     {
-        $startDate = $endDate.AddSeconds( - ( ( $last.Substring( 0 ,$last.Length - 1 ) -as [int] ) * $multiplier ) )
+        $startDate = $endDate.AddSeconds( - ( ( $last.Substring( 0 ,$last.Length - 1 ) -as [decimal] ) * $multiplier ) )
     }
     $startEventFilter.Add( 'StartTime' , $startDate )
 }
@@ -213,14 +214,15 @@ Get-WmiObject win32_logonsession -Filter "LogonType='10' or LogonType='12' or Lo
         $logons.Add( $session.LogonId , $users )
     }
 }
-    
 
 [hashtable]$stopEventFilter = $startEventFilter.Clone()
 $stopEventFilter[ 'Id' ] = 4689
-[array]$endEvents = @( Get-WinEvent -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue )
-
 $eventError = $null
 $error.Clear()
+
+[array]$endEvents = @( Get-WinEvent -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue )
+
+Write-Verbose "Got $($endEvents.Count) process end events"
 
 ## Find all process starts then we'll look for the corresponding stops
 [array]$processes = @( Get-WinEvent -FilterHashtable $startEventFilter -Oldest -ErrorAction SilentlyContinue -ErrorVariable 'eventError'  | ForEach-Object `
@@ -341,7 +343,7 @@ if( ! $processes.Count )
 else
 {
     $headings = [System.Collections.ArrayList]@( @{n='User Name';e={'{0}\{1}' -f $_.SubjectDomainName , $_.SubjectUserName}} , @{n='Process';e={$_.NewProcessName}} , @{n='PID';e={$_.NewProcessId}} , `
-        'CommandLine' , @{n='Parent Process';e={$_.ParentProcessName}} , @{n='Parent PID';e={$_.ProcessId}} , @{n='Start';e={('{0}.{1}' -f (Get-Date -Date $_.start -Format G) , $_.start.Millisecond)}} , `
+        'CommandLine' , @{n='Parent Process';e={$_.ParentProcessName}} , 'SubjectLogonId' , @{n='Parent PID';e={$_.ProcessId}} , @{n='Start';e={('{0}.{1}' -f (Get-Date -Date $_.start -Format G) , $_.start.Millisecond)}} , `
         @{n='End';e={('{0}.{1}' -f (Get-Date -Date $_.end -Format G) , $_.end.Millisecond)}} , 'Duration' , @{n='Exit Code';e={if( $_.'Exit Code' -ne $null ) { '0x{0:x}' -f $_.'Exit Code'}}} )
     if( $logon )
     {
