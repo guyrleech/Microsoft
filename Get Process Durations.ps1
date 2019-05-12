@@ -8,6 +8,8 @@
 
     10/05/2019  GRL   Added subject logon id to grid view output
                       Added enable/disable of process creatiuon and termination auditing
+
+    12/05/2019  GRL   Remove process termination events from array for speed increase
 #>
 
 <#
@@ -268,7 +270,7 @@ $stopEventFilter[ 'Id' ] = 4689
 $eventError = $null
 $error.Clear()
 
-[array]$endEvents = @( Get-WinEvent -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue )
+$endEvents = [System.Collections.ArrayList]@( Get-WinEvent -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue )
 
 Write-Verbose "Got $($endEvents.Count) process end events"
 
@@ -288,8 +290,24 @@ Write-Verbose "Got $($endEvents.Count) process end events"
             $started.Set_Item( 'SubjectUserName' , $systemAccounts[ ($event.Properties[ 0 ].Value | Select-Object -ExpandProperty Value) ] )
             $started.Set_Item( 'SubjectDomainName' , $env:COMPUTERNAME )
         }
+
         ## now find corresponding termination event - don't use hashtable since could have duplicate pids
-        $terminate = $endEvents | Where-Object { $_.Id -eq 4689 -and $_.TimeCreated -ge $event.TimeCreated -and $_.Properties[ $endProcessId ].Value -eq $started.NewProcessId  } | Select-Object -First 1
+        $terminate = $null ; 
+        For( [int]$index = 0 ; $index -lt $endEvents.Count ; $index++ )
+        {
+            $endEvent = $endEvents[ $index ]
+            if( $endEvent.Id -eq 4689 -and $endEvent.TimeCreated -ge $event.TimeCreated -and $endEvent.Properties[ $endProcessId ].Value -eq $started.NewProcessId )
+            {
+                $terminate = $endEvent
+                $started += @{
+                    'Exit Code' = $terminate.Properties[ $endStatus ].value
+                    'End' = $terminate.TimeCreated
+                    'Duration' = (New-TimeSpan -Start $event.TimeCreated -End $terminate.TimeCreated | Select-Object -ExpandProperty TotalMilliSeconds) / 1000 }
+        
+                $endEvents.RemoveAt( $index ) ## remove from array as will not need again and makes lookup 2x faster
+                break
+            }
+        }
 
         if( ! $terminate ) ## probably still running
         {
@@ -299,10 +317,6 @@ Write-Verbose "Got $($endEvents.Count) process end events"
                 Write-Warning "Cannot find process terminated event for pid $($started.NewProcessId) and not currently running"
             }
         }
-        
-        $started.Add( 'Exit Code' , $(if( $terminate ) { $terminate.Properties[ $endStatus ].value }))
-        $started.Add( 'End' , $(if( $terminate ) { $terminate.TimeCreated }))
-        $started.Add( 'Duration' , $(if( $terminate ) { (New-TimeSpan -Start $event.TimeCreated -End $terminate.TimeCreated | Select-Object -ExpandProperty TotalMilliSeconds) / 1000 }))
 
         if( $logon )
         {
