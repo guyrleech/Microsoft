@@ -10,6 +10,7 @@
                       Added enable/disable of process creatiuon and termination auditing
 
     12/05/2019  GRL   Remove process termination events from array for speed increase
+                      Enable cmd line auditing when -enable specified
 #>
 
 <#
@@ -177,6 +178,11 @@ if( $enable -or $disable )
             Write-Error "Error running auditpol.exe to set $($requiredAuditEvent.Name) auditing to $state - error $($process|Select-Object -ExpandProperty ExitCode)"
             $errors++
         }
+    }
+
+    if( $enable )
+    {
+        [void](New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit' -Name 'ProcessCreationIncludeCmdLine_Enabled' -Value 1 -PropertyType 'DWord' -Force)
     }
 
     Exit $errors
