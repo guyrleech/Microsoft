@@ -14,6 +14,8 @@
 
     13/05/2019  GRL   Added creation and modification times of executables & executable summary option
                       Added multiple computer capability
+
+    23/05/2019  GRL   Added option for processing saved event log files
 #>
 
 <#
@@ -28,6 +30,10 @@ Only include processes for users which match this regular expression
 .PARAMETER processName
 
 Only include processes which match this regular expression
+
+.PARAMETER eventLog
+
+The path to an event log file containing saved events
 
 .PARAMETER start
 
@@ -115,6 +121,7 @@ Param
     [string]$start ,
     [string]$end ,
     [string]$last ,
+    [string]$eventLog ,
     [string[]]$computers = @( $env:COMPUTERNAME ) ,
     [switch]$logon ,
     [switch]$boot ,
@@ -123,6 +130,7 @@ Param
     [switch]$summary ,
     [string]$outputFile ,
     [switch]$nogridview ,
+    [switch]$noFileInfo ,
     [switch]$excludeSystem 
 )
 
@@ -180,6 +188,11 @@ if( $enable -and $disable )
     Throw 'Cannot enable and disable in same call'
 }
 
+if( $summary -and $noFileInfo )
+{
+    Throw 'Cannot specify -noFileInfo with -summary'
+}
+
 if( $enable -or $disable )
 {
     [hashtable]$requiredAuditEvents = @{
@@ -215,9 +228,10 @@ if( $PSBoundParameters[ 'last' ] -and ( $PSBoundParameters[ 'start' ] -or $PSBou
 }
 
 [hashtable]$startEventFilter = @{
-    'Logname' = 'Security'
     'Id' = 4688
 }
+
+[int]$secondsAgo = 0
 
 if( ! [string]::IsNullOrEmpty( $last ) )
 {
@@ -236,13 +250,16 @@ if( ! [string]::IsNullOrEmpty( $last ) )
     $endDate = Get-Date
     if( $last.Length -le 1 )
     {
-        $startDate = $endDate.AddSeconds( -$multiplier )
+        $secondsAgo = $multiplier
     }
     else
     {
-        $startDate = $endDate.AddSeconds( - ( ( $last.Substring( 0 ,$last.Length - 1 ) -as [decimal] ) * $multiplier ) )
+        $secondsAgo = ( ( $last.Substring( 0 , $last.Length - 1 ) -as [decimal] ) * $multiplier )
     }
+
+    $startDate = $endDate.AddSeconds( -$secondsAgo )
     $startEventFilter.Add( 'StartTime' , $startDate )
+    ## if using event log file so -last is relative to the latest event in the file so -1h means 0700 if latest event is 0800 but we'll calculate this when we process that computer (which is probably local anyway) and change STartTime
 }
 
 if( $PSBoundParameters[ 'start' ] )
@@ -260,6 +277,15 @@ if( $PSBoundParameters[ 'end' ] )
 [int]$counter = 0
 
 [hashtable]$fileProperties = @{}
+
+if( $PSBoundParameters[ 'eventLog' ] )
+{
+    $startEventFilter.Add( 'Path' , $eventLog )
+}
+else
+{
+    $startEventFilter.Add( 'LogName', 'Security' )
+}
 
 [array]$processes = @( ForEach( $computer in $computers )
 {
@@ -288,19 +314,28 @@ if( $PSBoundParameters[ 'end' ] )
 
     $bootTime = $null
 
-    if( $boot )
-    {
-        ## get the boot time so we can add a column relative to it
-        $bootTime = Get-CimInstance @remoteParam -ClassName Win32_OperatingSystem | Select-Object -ExpandProperty LastBootupTime
-    }
+    ## get the boot time so we can add a column relative to it and also check a process start is after latest boot otherwise LSASS won't have login details for it
+    $bootTime = Get-CimInstance @remoteParam -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LastBootupTime
     
-    ## Get Oldest event before we filter on date so can report oldest
-    $earliestEventHere =  Get-WinEvent @remoteParam  -FilterHashtable $startEventFilter -Oldest -ErrorAction SilentlyContinue -MaxEvents 1
-    if( ! $earliestEvent -or $earliestEventHere -lt $earliestEvent )
+    ## If using event log file and -last then we need to get the date of the newest event as -last will be relative to that
+    if( $PSBoundParameters[ 'last' ] -and $PSBoundParameters[ 'eventLog' ] )
     {
-        $earliestEvent -eq $earliestEventHere
+        ## Remove start time from hash table
+        $startEventFilter.Remove( 'StartTime' )
+        $latestEventHere = Get-WinEvent @remoteParam -FilterHashtable $startEventFilter -ErrorAction SilentlyContinue -MaxEvents 1
+        if( $latestEventHere )
+        {
+            $startEventFilter.Add( 'StartTime' , $latestEventHere.TimeCreated.AddSeconds( - $secondsAgo ) )
+        }
     }
 
+    ## Get Oldest event before we filter on date so can report oldest
+    $earliestEventHere = Get-WinEvent @remoteParam -FilterHashtable $startEventFilter -Oldest -ErrorAction SilentlyContinue -MaxEvents 1
+    if( ! $earliestEvent -or $earliestEventHere -lt $earliestEvent )
+    {
+        $earliestEvent = $earliestEventHere
+    }
+    
     [hashtable]$logons = @{}
     ## get logons so we can cross reference to the id of the logon
     Get-WmiObject @remoteParam win32_logonsession -Filter "LogonType='10' or LogonType='12' or LogonType='2' or LogonType='11'" | ForEach-Object `
@@ -341,9 +376,17 @@ if( $PSBoundParameters[ 'end' ] )
     {
         $processes = @( Invoke-Command @remoteParam -ScriptBlock { Get-Process -IncludeUserName } )
     }
-    ForEach( $process in $processes )
+
+    ## Don't cache if saved event log not for this machine 
+    if( ( $earliestEventHere -and ( $earliestEventHere.MachineName -eq $computer -or ( $earliestEventHere.MachineName -split '\.' )[0] -eq $computer ) ) )
     {
-        $runningProcesses.Add( [int]$process.Id , $process )
+        ForEach( $process in $processes )
+        {
+            if( ! $bootTime -or $process.StartTime -ge $bootTime )
+            {
+                $runningProcesses.Add( [int]$process.Id , $process )
+            }
+        }
     }
 
     ## Find all process starts then we'll look for the corresponding stops
@@ -381,94 +424,97 @@ if( $PSBoundParameters[ 'end' ] )
                 }
             }
 
-            $exeProperties = $fileProperties[ $started.NewProcessName ]
-            if( ! $exeProperties )
+            if( ! $noFileInfo )
             {
-                if( $remoteParam.Count )
+                $exeProperties = $fileProperties[ $started.NewProcessName ]
+                if( ! $exeProperties )
                 {
-                    $result = Invoke-Command @remoteParam -ScriptBlock { Get-ItemProperty -Path $($using:started).NewProcessName -ErrorAction SilentlyContinue }
-                    if( $result )
+                    if( $remoteParam.Count )
                     {
-                        ## This is a deserialised object which doesn't seem to persist new properties added so we will make a local copy
-                        $exeProperties = New-Object -TypeName 'PSCustomObject'
-                        $result.PSObject.Properties | Where-Object MemberType -Match 'property$' | ForEach-Object `
+                        $result = Invoke-Command @remoteParam -ScriptBlock { Get-ItemProperty -Path $($using:started).NewProcessName -ErrorAction SilentlyContinue }
+                        if( $result )
                         {
-                            if( $_.Name -eq 'VersionInfo' ) ## has been flattened into a string so need to unflatten
+                            ## This is a deserialised object which doesn't seem to persist new properties added so we will make a local copy
+                            $exeProperties = New-Object -TypeName 'PSCustomObject'
+                            $result.PSObject.Properties | Where-Object MemberType -Match 'property$' | ForEach-Object `
                             {
-                                [int]$added = 0
-                                $versionInfo = New-Object -TypeName 'PSCustomObject'
-                                $_.Value -split "`n" | ForEach-Object `
+                                if( $_.Name -eq 'VersionInfo' ) ## has been flattened into a string so need to unflatten
                                 {
-                                    [string[]]$split = $_ -split ':',2 ## will be : in file names so only split on first
-                                    if( $split -and $split.Count -eq 2 )
+                                    [int]$added = 0
+                                    $versionInfo = New-Object -TypeName 'PSCustomObject'
+                                    $_.Value -split "`n" | ForEach-Object `
                                     {
-                                        Add-Member -InputObject $versionInfo -MemberType NoteProperty -Name $split[0] -Value ($split[1]).Trim()
-                                        $added++
+                                        [string[]]$split = $_ -split ':',2 ## will be : in file names so only split on first
+                                        if( $split -and $split.Count -eq 2 )
+                                        {
+                                            Add-Member -InputObject $versionInfo -MemberType NoteProperty -Name $split[0] -Value ($split[1]).Trim()
+                                            $added++
+                                        }
+                                    }
+                                    if( $added )
+                                    {
+                                        Add-Member -InputObject $exeProperties -MemberType NoteProperty -Name VersionInfo -Value $versionInfo 
                                     }
                                 }
-                                if( $added )
+                                else
                                 {
-                                    Add-Member -InputObject $exeProperties -MemberType NoteProperty -Name VersionInfo -Value $versionInfo 
+                                    Add-Member -InputObject $exeProperties -MemberType NoteProperty -Name $_.Name -Value $_.Value
                                 }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        $exeProperties = Get-ItemProperty -Path $started.NewProcessName -ErrorAction SilentlyContinue
+                    }
+                    if( $exeProperties ) 
+                    {  
+                        try
+                        {
+                            if( $remoteParam.Count )
+                            {
+                                $signatureStatus = Invoke-Command @remoteParam -ScriptBlock { Get-AuthenticodeSignature -FilePath $($using:exeProperties).FullName -ErrorAction SilentlyContinue } | Select -ExpandProperty 'Status' | select -ExpandProperty 'Value'
                             }
                             else
                             {
-                                Add-Member -InputObject $exeProperties -MemberType NoteProperty -Name $_.Name -Value $_.Value
+                                $signatureStatus = Get-AuthenticodeSignature -FilePath $exeProperties.FullName -ErrorAction SilentlyContinue | Select -ExpandProperty 'Status'
                             }
                         }
+                        catch
+                        {
+                            $signatureStatus = '?'
+                        }
+                        if( $remoteParam.Count )
+                        {
+                            $owner = Invoke-Command @remoteParam -ScriptBlock {  Get-Acl -Path $($using:started).NewProcessName -ErrorAction SilentlyContinue | Select -ExpandProperty Owner }
+                        }
+                        else
+                        {
+                            $owner = Get-Acl -Path $started.NewProcessName -ErrorAction SilentlyContinue | Select -ExpandProperty Owner
+                        }
+                        $extraProperties = Add-Member -PassThru -InputObject $exeProperties -Force -NotePropertyMembers @{
+                            'Signed' = if( $signatureStatus.ToString() -eq 'Valid' ) { 'Yes' } else { 'No' }
+                            'Occurrences' = ([int]1)
+                            'Owner' = $owner
+                        }
+                        $fileProperties.Add( $started.NewProcessName , $extraProperties )
                     }
                 }
                 else
                 {
-                    $exeProperties = Get-ItemProperty -Path $started.NewProcessName -ErrorAction SilentlyContinue
+                    $exeProperties.Occurrences += 1
                 }
-                if( $exeProperties ) 
-                {  
-                    try
-                    {
-                        if( $remoteParam.Count )
-                        {
-                            $signatureStatus = Invoke-Command @remoteParam -ScriptBlock { Get-AuthenticodeSignature -FilePath $($using:exeProperties).FullName -ErrorAction SilentlyContinue } | Select -ExpandProperty 'Status' | select -ExpandProperty 'Value'
-                        }
-                        else
-                        {
-                            $signatureStatus = Get-AuthenticodeSignature -FilePath $exeProperties.FullName -ErrorAction SilentlyContinue | Select -ExpandProperty 'Status'
-                        }
-                    }
-                    catch
-                    {
-                        $signatureStatus = '?'
-                    }
-                    if( $remoteParam.Count )
-                    {
-                        $owner = Invoke-Command @remoteParam -ScriptBlock {  Get-Acl -Path $($using:started).NewProcessName -ErrorAction SilentlyContinue | Select -ExpandProperty Owner }
-                    }
-                    else
-                    {
-                        $owner = Get-Acl -Path $started.NewProcessName -ErrorAction SilentlyContinue | Select -ExpandProperty Owner
-                    }
-                    $extraProperties = Add-Member -PassThru -InputObject $exeProperties -Force -NotePropertyMembers @{
-                        'Signed' = if( $signatureStatus.ToString() -eq 'Valid' ) { 'Yes' } else { 'No' }
-                        'Occurrences' = ([int]1)
-                        'Owner' = $owner
-                    }
-                    $fileProperties.Add( $started.NewProcessName , $extraProperties )
+                if( $exeProperties )
+                {     
+                    $started += @{
+                        'Exe Signed' = $exeProperties.Signed
+                        'Exe Created' = $exeProperties.CreationTime
+                        'Exe Modified' = $exeProperties.LastWriteTime 
+                        'Exe File Owner' = $exeProperties.Owner }
                 }
-            }
-            else
-            {
-                $exeProperties.Occurrences += 1
-            }
-            if( $exeProperties )
-            {     
-                $started += @{
-                    'Exe Signed' = $exeProperties.Signed
-                    'Exe Created' = $exeProperties.CreationTime
-                    'Exe Modified' = $exeProperties.LastWriteTime 
-                    'Exe File Owner' = $exeProperties.Owner }
             }
 
-            if( ! $terminate ) ## probably still running
+            if( ! $terminate -and ! $PSBoundParameters[ 'eventLog' ] ) ## probably still running
             {
                 $existing = $runningProcesses[ [int]$started.NewProcessId ]
                 if( $existing )
@@ -486,7 +532,8 @@ if( $PSBoundParameters[ 'end' ] )
                 }
             }
 
-            if( $logon )
+            ## check on same computer and logon after last boot othwerwise LSASS won't have it
+            if( $logon -and  ( $earliestEventHere -and ( $earliestEventHere.MachineName -eq $computer -or ( $earliestEventHere.MachineName -split '\.' )[0] -eq $computer ) ) -and ( ! $bootTime -or $started.Start -ge $bootTime ) )
             {
                 ## get the logon time so we can add a column relative to it
                 $logonTime = $null
@@ -522,7 +569,7 @@ if( $PSBoundParameters[ 'end' ] )
                     $started.Add( 'After Logon (s)' , $(if( $theLogon ) { New-TimeSpan -Start $theLogon.LogonTime -End $started.Start | Select-Object -ExpandProperty TotalSeconds } ) )
                 }
             }
-            if( $bootTime )
+            if( $boot -and $bootTime )
             {
                 $started.Add( 'After Boot (s)' , $(if( $theLogon ) { New-TimeSpan -Start $bootTime -End $started.Start | Select-Object -ExpandProperty TotalSeconds } ) )
             }
@@ -625,12 +672,16 @@ else
     }
     $headings += @( @{n='Process';e={$_.NewProcessName}} , @{n='PID';e={$_.NewProcessId}} , `
         'CommandLine' , @{n='Parent Process';e={$_.ParentProcessName}} , 'SubjectLogonId' , @{n='Parent PID';e={$_.ProcessId}} , @{n='Start';e={('{0}.{1}' -f (Get-Date -Date $_.start -Format G) , $_.start.Millisecond)}} , `
-        @{n='End';e={('{0}.{1}' -f (Get-Date -Date $_.end -Format G) , $_.end.Millisecond)}} , 'Duration' , 'Exe Created' , 'Exe Modified' , 'Exe File Owner' , @{n='Exit Code';e={if( $_.'Exit Code' -ne $null ) { '0x{0:x}' -f $_.'Exit Code'}}} )
+        @{n='End';e={('{0}.{1}' -f (Get-Date -Date $_.end -Format G) , $_.end.Millisecond)}} , 'Duration' ,  @{n='Exit Code';e={if( $_.'Exit Code' -ne $null ) { '0x{0:x}' -f $_.'Exit Code'}}} )
+    if( ! $noFileInfo )
+    {
+        $headings += @( 'Exe Created' , 'Exe Modified' , 'Exe File Owner' )
+    }
     if( $logon )
     {
         $headings += @( @{n='Logon Time';e={('{0}.{1}' -f (Get-Date -Date $_.'Logon Time' -Format G) , $_.'Logon Time'.Millisecond)}} , 'After Logon (s)' )
     }
-    if( $bootTime )
+    if( $boot -and $bootTime )
     {
         $headings += @( @{n='Boot Time';e={Get-Date -Date $bootTime -Format G}} , 'After Boot (s)' )
     }
