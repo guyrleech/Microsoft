@@ -16,6 +16,9 @@
                       Added multiple computer capability
 
     23/05/2019  GRL   Added option for processing saved event log files
+                      Added option for having no exe file details
+
+    13/06/2019  GRL   Moved end event cache to hash table for considerable speed improvement
 #>
 
 <#
@@ -74,6 +77,10 @@ Output the results to the pipeline rather than a grid view
 .PARAMETER excludeSystem
 
 Do not include processes run by the system account
+
+.PARAMETER noFileInfo
+
+Do not include exe file information
 
 .PARAMETER summary
 
@@ -183,6 +190,8 @@ Function Get-AuditSetting
     }
 }
 
+[datetime]$started = Get-Date
+
 if( $enable -and $disable )
 {
     Throw 'Cannot enable and disable in same call'
@@ -275,7 +284,7 @@ if( $PSBoundParameters[ 'end' ] )
 [bool]$differentUserName = $false
 
 [int]$counter = 0
-
+[int]$index = 0
 [hashtable]$fileProperties = @{}
 
 if( $PSBoundParameters[ 'eventLog' ] )
@@ -312,11 +321,6 @@ else
         $systemAccounts.Add( $_.SID , $_.Name )
     }
 
-    $bootTime = $null
-
-    ## get the boot time so we can add a column relative to it and also check a process start is after latest boot otherwise LSASS won't have login details for it
-    $bootTime = Get-CimInstance @remoteParam -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LastBootupTime
-    
     ## If using event log file and -last then we need to get the date of the newest event as -last will be relative to that
     if( $PSBoundParameters[ 'last' ] -and $PSBoundParameters[ 'eventLog' ] )
     {
@@ -330,6 +334,7 @@ else
     }
 
     ## Get Oldest event before we filter on date so can report oldest
+    $earliestEvent = $null
     $earliestEventHere = Get-WinEvent @remoteParam -FilterHashtable $startEventFilter -Oldest -ErrorAction SilentlyContinue -MaxEvents 1
     if( ! $earliestEvent -or $earliestEventHere -lt $earliestEvent )
     {
@@ -362,24 +367,56 @@ else
     $stopEventFilter[ 'Id' ] = 4689
     $eventError = $null
     $error.Clear()
+    [int]$multiplePids = 0
 
-    $endEvents = [System.Collections.ArrayList]@( Get-WinEvent @remoteParam -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue )
+    [hashtable]$endEvents = @{}
+    Get-WinEvent @remoteParam -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue | ForEach-Object `
+    {
+        $event = $_
+        try
+        {
+            $endEvents.Add( $event.Properties[ $endProcessId ].Value -as [int] , $event )
+        }
+        catch
+        {
+            ## already got it so will need to have an array so we can look for the right start time and or user
+            $existing = $endEvents[ [int]$event.Properties[ $endProcessId ].Value ]
+            if( $existing -is [System.Collections.ArrayList] )
+            {
+                [void]($endEvents[ $event.Properties[ $endProcessId ].Value -as [int] ]).Add( $event ) ## appends
+                $multiplePids++
+            }
+            elseif( $existing )
+            {
+                $endEvents[ [int]$event.Properties[ $endProcessId ].Value ] = [System.Collections.ArrayList]@( $existing , $event ) ## oldest first
+            }
+            else
+            {
+                Throw $_
+            }
+        }
+    }
 
-    Write-Verbose "Got $($endEvents.Count) process end events from $computer"
+    Write-Verbose "Got $($endEvents.Count) + $multiplePids end events from $computer"
 
     [hashtable]$runningProcesses = @{}
     if( $remoteParam.Count )
     {
-        $processes = @( Get-Process -IncludeUserName )
+        $processes = @( Invoke-Command @remoteParam -ScriptBlock { Get-Process -IncludeUserName } )
     }
     else
     {
-        $processes = @( Invoke-Command @remoteParam -ScriptBlock { Get-Process -IncludeUserName } )
+        $processes = @( Get-Process -IncludeUserName )
     }
+    
+    $bootTime = $null
 
     ## Don't cache if saved event log not for this machine 
     if( ( $earliestEventHere -and ( $earliestEventHere.MachineName -eq $computer -or ( $earliestEventHere.MachineName -split '\.' )[0] -eq $computer ) ) )
     {
+        ## get the boot time so we can add a column relative to it and also check a process start is after latest boot otherwise LSASS won't have login details for it
+        $bootTime = Get-CimInstance @remoteParam -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LastBootupTime
+    
         ForEach( $process in $processes )
         {
             if( ! $bootTime -or $process.StartTime -ge $bootTime )
@@ -406,22 +443,45 @@ else
                 $started.Set_Item( 'SubjectDomainName' , $env:COMPUTERNAME )
             }
 
-            ## now find corresponding termination event - don't use hashtable since could have duplicate pids
-            $terminate = $null ; 
-            For( [int]$index = 0 ; $index -lt $endEvents.Count ; $index++ )
+            ## now find corresponding termination event
+            $terminate = $endEvents[ [int]$started.NewProcessId ]
+            if( $terminate -is [System.Collections.ArrayList] -and $terminate.Count )
             {
-                $endEvent = $endEvents[ $index ]
-                if( $endEvent.Id -eq 4689 -and $endEvent.TimeCreated -ge $event.TimeCreated -and $endEvent.Properties[ $endProcessId ].Value -eq $started.NewProcessId )
+                ## need to find the right event as have multiple pids but oldest first so pick the first one after the time we need
+                $thisTerminate = $null
+                $index = 0
+                do
                 {
-                    $terminate = $endEvent
-                    $started += @{
-                        'Exit Code' = $terminate.Properties[ $endStatus ].value
-                        'End' = $terminate.TimeCreated
-                        'Duration' = (New-TimeSpan -Start $event.TimeCreated -End $terminate.TimeCreated | Select-Object -ExpandProperty TotalMilliSeconds) / 1000 }
-        
-                    $endEvents.RemoveAt( $index ) ## remove from array as will not need again and makes lookup 2x faster
-                    break
+                    try
+                    {
+                        if( $terminate[$index].TimeCreated -gt $event.TimeCreated )
+                        {
+                            $thisTerminate = $terminate[$index]
+                        }
+                    }
+                    catch
+                    {
+                        Write-Error $_
+                    }
+                } while( ! $thisTerminate -and (++$index) -lt $terminate.Count )
+
+                if( $thisTerminate )
+                {
+                    $terminate.RemoveAt( $index )
+                    $terminate = $thisTerminate
                 }
+                else
+                {
+                    $terminate = $null
+                }
+            }
+            
+            if( $terminate )
+            {
+                $started += @{
+                    'Exit Code' = $terminate.Properties[ $endStatus ].value
+                    'End' = $terminate.TimeCreated
+                    'Duration' = (New-TimeSpan -Start $event.TimeCreated -End $terminate.TimeCreated | Select-Object -ExpandProperty TotalMilliSeconds) / 1000 }
             }
 
             if( ! $noFileInfo )
@@ -533,6 +593,7 @@ else
             }
 
             ## check on same computer and logon after last boot othwerwise LSASS won't have it
+            $theLogon = $null
             if( $logon -and  ( $earliestEventHere -and ( $earliestEventHere.MachineName -eq $computer -or ( $earliestEventHere.MachineName -split '\.' )[0] -eq $computer ) ) -and ( ! $bootTime -or $started.Start -ge $bootTime ) )
             {
                 ## get the logon time so we can add a column relative to it
@@ -541,7 +602,6 @@ else
 
                 if( $thisLogon )
                 {
-                    $theLogon = $null
                     if( $thisLogon -is [array] )
                     {
                         ## Need to find this user
@@ -618,6 +678,7 @@ if( $earliestEvent )
     $status += " earliest event $(Get-Date $earliestEvent.TimeCreated -Format G)"
 }
 
+Write-Verbose "Got $($processes.Count) processes $status in $((New-TimeSpan -Start $started -End (Get-Date)).TotalSeconds) seconds"
 
 if( ! $processes.Count )
 {
