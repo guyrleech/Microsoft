@@ -190,7 +190,7 @@ Function Get-AuditSetting
     }
 }
 
-[datetime]$started = Get-Date
+[datetime]$startTime = Get-Date
 
 if( $enable -and $disable )
 {
@@ -678,7 +678,7 @@ if( $earliestEvent )
     $status += " earliest event $(Get-Date $earliestEvent.TimeCreated -Format G)"
 }
 
-Write-Verbose "Got $($processes.Count) processes $status in $((New-TimeSpan -Start $started -End (Get-Date)).TotalSeconds) seconds"
+Write-Verbose "Got $($processes.Count) processes $status in $((New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds) seconds"
 
 if( ! $processes.Count )
 {
