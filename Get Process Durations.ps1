@@ -19,6 +19,8 @@
                       Added option for having no exe file details
 
     13/06/2019  GRL   Moved end event cache to hash table for considerable speed improvement
+
+    14/06/2019  GRL   Fixed bug giving negative durations. Filtering on process stop collection building
 #>
 
 <#
@@ -373,26 +375,29 @@ else
     Get-WinEvent @remoteParam -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue | ForEach-Object `
     {
         $event = $_
-        try
+        if( ( ! $username -or $event.Properties[ $endSubjectUserName ].Value -match $username ) -and ( ! $processName -or $event.Properties[$endProcessName].value -match $processName ) )
         {
-            $endEvents.Add( $event.Properties[ $endProcessId ].Value -as [int] , $event )
-        }
-        catch
-        {
-            ## already got it so will need to have an array so we can look for the right start time and or user
-            $existing = $endEvents[ [int]$event.Properties[ $endProcessId ].Value ]
-            if( $existing -is [System.Collections.ArrayList] )
+            try
             {
-                [void]($endEvents[ $event.Properties[ $endProcessId ].Value -as [int] ]).Add( $event ) ## appends
-                $multiplePids++
+                $endEvents.Add( $event.Properties[ $endProcessId ].Value -as [int] , $event )
             }
-            elseif( $existing )
+            catch
             {
-                $endEvents[ [int]$event.Properties[ $endProcessId ].Value ] = [System.Collections.ArrayList]@( $existing , $event ) ## oldest first
-            }
-            else
-            {
-                Throw $_
+                ## already got it so will need to have an array so we can look for the right start time and or user
+                $existing = $endEvents[ [int]$event.Properties[ $endProcessId ].Value ]
+                if( $existing -is [System.Collections.ArrayList] )
+                {
+                    [void]($endEvents[ $event.Properties[ $endProcessId ].Value -as [int] ]).Add( $event ) ## appends
+                    $multiplePids++
+                }
+                elseif( $existing )
+                {
+                    $endEvents[ [int]$event.Properties[ $endProcessId ].Value ] = [System.Collections.ArrayList]@( $existing , $event ) ## oldest first
+                }
+                else
+                {
+                    Throw $_
+                }
             }
         }
     }
@@ -433,7 +438,7 @@ else
         if( ( ! $username -or $event.Properties[ 1 ].Value -match $username ) -and ( ! $excludeSystem -or ( $event.Properties[ 1 ].Value -ne $machineAccount -and $event.Properties[ 1 ].Value -ne '-' )) -and ( ! $processName -or $event.Properties[5].value -match $processName ) )
         {
             [hashtable]$started = @{ 'Start' = $event.TimeCreated ; 'Computer' = $computer }
-            For( [int]$index = 0 ; $index -lt [math]::Min( $startPropertiesMap.Count , $event.Properties.Count ) ; $index++ )
+            For( $index = 0 ; $index -lt [math]::Min( $startPropertiesMap.Count , $event.Properties.Count ) ; $index++ )
             {
                 $started.Add( $startPropertiesMap[ $index ] , $event.Properties[ $index ].value )
             }
@@ -454,7 +459,7 @@ else
                 {
                     try
                     {
-                        if( $terminate[$index].TimeCreated -gt $event.TimeCreated )
+                        if( $terminate[$index].TimeCreated -ge $event.TimeCreated )
                         {
                             $thisTerminate = $terminate[$index]
                         }
@@ -474,6 +479,10 @@ else
                 {
                     $terminate = $null
                 }
+            }
+            elseif( $terminate -and $terminate.TimeCreated -lt $event.TimeCreated ) ## This is not the event you are looking for (because it is prior to the launch)
+            {
+                $terminate = $null
             }
             
             if( $terminate )
