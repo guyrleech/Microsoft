@@ -16,6 +16,8 @@
                      Added -silent to run silent uninstalls where installer is msiexec
                      Added -quiet option
     02/03/19   GRL   Added SystemComponent value
+
+    23/07/19   GRL   Added HKU searching
 #>
 
 <#
@@ -212,6 +214,89 @@ Function Remove-Package()
     $uninstallerRan
 }
 
+Function Process-RegistryKey
+{
+    [CmdletBinding()]
+    Param
+    (
+        [string]$hive ,
+        $reg ,
+        [string[]]$UninstallKeys ,
+        [switch]$includeEmptyDisplayNames ,
+        [AllowNull()]
+        [string]$username
+    )
+
+    ForEach( $UninstallKey in $UninstallKeys )
+    {
+        $regkey = $reg.OpenSubKey($UninstallKey) 
+    
+        if( $regkey )
+        {
+            [string]$architecture = if( $UninstallKey -match '\\wow6432node\\' ){ '32 bit' } else { 'Native' } 
+
+            $subkeys = $regkey.GetSubKeyNames() 
+    
+            foreach($key in $subkeys)
+            {
+                $thisKey = Join-Path -Path $UninstallKey -ChildPath $key 
+
+                $thisSubKey = $reg.OpenSubKey($thisKey) 
+
+                if( $includeEmptyDisplayNames -or ! [string]::IsNullOrEmpty( $thisSubKey.GetValue('DisplayName') ) )
+                {
+                    [string]$installDate = $thisSubKey.GetValue('InstallDate')
+                    $installedOn = New-Object -TypeName 'DateTime'
+                    if( [string]::IsNullOrEmpty( $installDate ) -or ! [datetime]::TryParseExact( $installDate , 'yyyyMMdd' , [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$installedOn ) )
+                    {
+                        $installedOn = $null
+                    }
+                    $size = New-Object -TypeName 'Int'
+                    if( ! [int]::TryParse( $thisSubKey.GetValue('EstimatedSize') , [ref]$size ) )
+                    {
+                        $size = $null
+                    }
+                    else
+                    {
+                        $size = [math]::Round( $size / 1KB , 1 ) ## already in KB
+                    }
+
+                    [pscustomobject][ordered]@{
+                        'ComputerName' = $computername
+                        'Hive' = $Hive
+                        'User' = $username
+                        'Key' = $key
+                        'Architecture' = $architecture
+                        'DisplayName' = $($thisSubKey.GetValue('DisplayName'))
+                        'DisplayVersion' = $($thisSubKey.GetValue('DisplayVersion'))
+                        'InstallLocation' = $($thisSubKey.GetValue('InstallLocation'))
+                        'Publisher' = $($thisSubKey.GetValue('Publisher'))
+                        'InstallDate' = $installedOn
+                        'Size (MB)' = $size
+                        'System Component' = $($thisSubKey.GetValue('SystemComponent') -eq 1)
+                        'Comments' = $($thisSubKey.GetValue('Comments'))
+                        'Contact' = $($thisSubKey.GetValue('Contact'))
+                        'HelpLink' = $($thisSubKey.GetValue('HelpLink'))
+                        'HelpTelephone' = $($thisSubKey.GetValue('HelpTelephone'))
+                        'Uninstall' = $($thisSubKey.GetValue('UninstallString'))
+                    }
+                }
+                else
+                {
+                    Write-Warning "Ignoring `"$hive\$thisKey`" on $computername as has no DisplayName entry"
+                }
+
+                $thisSubKey.Close()
+            } 
+            $regKey.Close()
+        }
+        elseif( $hive -eq 'HKLM' )
+        {
+            Write-Warning "Failed to open `"$hive\$UninstallKey`" on $computername"
+        }
+    }
+}
+
 if( $quiet )
 {
     $VerbosePreference = $WarningPreference = 'SilentlyContinue'
@@ -284,77 +369,40 @@ if( ! $computers -or $computers.Count -eq 0 )
     
     if( $? -and $reg )
     {
-        ForEach( $UninstallKey in $UninstallKeys )
+        Process-RegistryKey -Hive 'HKLM' -reg $reg -UninstallKeys $UninstallKeys -includeEmptyDisplayNames:$includeEmptyDisplayNames
+        $reg.Close()
+    }
+    else
+    {
+        Write-Warning "Failed to open HKLM on $computername"
+    }
+
+    $reg = [microsoft.win32.registrykey]::OpenRemoteBaseKey( ‘Users’ , $computername )
+    
+    if( $? -and $reg )
+    {
+        ## get each user SID key and process that for per-user installed apps
+        ForEach( $subkey in $reg.GetSubKeyNames() )
         {
-            $regkey = $reg.OpenSubKey($UninstallKey) 
-    
-            if( $regkey )
+            if( ( $userReg = $reg.OpenSubKey( $subKey ) ) )
             {
-                [string]$architecture = if( $UninstallKey -match '\\wow6432node\\' ){ '32 bit' } else { 'Native' } 
-
-                $subkeys = $regkey.GetSubKeyNames() 
-    
-                foreach($key in $subkeys)
+                [string]$username = $null
+                try
                 {
-                    $thisKey = Join-Path -Path $UninstallKey -ChildPath $key 
-
-                    $thisSubKey = $reg.OpenSubKey($thisKey) 
-
-                    if( $includeEmptyDisplayNames -or ! [string]::IsNullOrEmpty( $thisSubKey.GetValue('DisplayName') ) )
-                    {
-                        [string]$installDate = $thisSubKey.GetValue('InstallDate')
-                        $installedOn = New-Object -TypeName 'DateTime'
-                        if( [string]::IsNullOrEmpty( $installDate ) -or ! [datetime]::TryParseExact( $installDate , 'yyyyMMdd' , [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$installedOn ) )
-                        {
-                            $installedOn = $null
-                        }
-                        $size = New-Object -TypeName 'Int'
-                        if( ! [int]::TryParse( $thisSubKey.GetValue('EstimatedSize') , [ref]$size ) )
-                        {
-                            $size = $null
-                        }
-                        else
-                        {
-                            $size = [math]::Round( $size / 1KB , 1 ) ## already in KB
-                        }
-
-                        [pscustomobject][ordered]@{
-                            'ComputerName' = $computername
-                            'Key' = $key
-                            'Architecture' = $architecture
-                            'DisplayName' = $($thisSubKey.GetValue('DisplayName'))
-                            'DisplayVersion' = $($thisSubKey.GetValue('DisplayVersion'))
-                            'InstallLocation' = $($thisSubKey.GetValue('InstallLocation'))
-                            'Publisher' = $($thisSubKey.GetValue('Publisher'))
-                            'InstallDate' = $installedOn
-                            'Size (MB)' = $size
-                            'System Component' = $($thisSubKey.GetValue('SystemComponent') -eq 1)
-                            'Comments' = $($thisSubKey.GetValue('Comments'))
-                            'Contact' = $($thisSubKey.GetValue('Contact'))
-                            'HelpLink' = $($thisSubKey.GetValue('HelpLink'))
-                            'HelpTelephone' = $($thisSubKey.GetValue('HelpTelephone'))
-                            'Uninstall' = $($thisSubKey.GetValue('UninstallString'))
-                        }
-                    }
-                    else
-                    {
-                        Write-Warning "Ignoring `"$thisKey`" on $computername as has no DisplayName entry"
-                    }
-
-                    $thisSubKey.Close()
-                } 
-                $regKey.Close()
-            }
-            else
-            {
-                Write-Warning "Failed to open `"HKLM\$UninstallKey`" on $computername"
+                    $username = ([System.Security.Principal.SecurityIdentifier]($subKey)).Translate([System.Security.Principal.NTAccount]).Value
+                }
+                catch
+                {
+                }
+                Process-RegistryKey -Hive (Join-Path -Path 'HKU' -ChildPath $subkey) -reg $userReg -UninstallKeys $UninstallKeys -includeEmptyDisplayNames:$includeEmptyDisplayNames -user $username
+                $userReg.Close()
             }
         }
         $reg.Close()
     }
     else
     {
-        Write-Warning "Failed to open HKLM on $computername"
+        Write-Warning "Failed to open HKU on $computername"
     }
 } ) | Sort -Property ComputerName, DisplayName
 
