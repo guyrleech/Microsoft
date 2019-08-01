@@ -25,6 +25,8 @@
     24/07/2019  GRL   Added time frames via logon sessions from LSASS
                       Added -listSessions to just show LSASS sessions retrieved
                       Changed -logon to -logonTimes and -boot to -bootTimes
+
+    01/08/2019  GRL   Added microsecond granularity to logon times displayed
 #>
 
 <#
@@ -391,6 +393,7 @@ if( ! [string]::IsNullOrEmpty( $last ) )
     ## if using event log file so -last is relative to the latest event in the file so -1h means 0700 if latest event is 0800 but we'll calculate this when we process that computer (which is probably local anyway) and change STartTime
 }
 
+$closest = $null
 if( $PSBoundParameters[ 'logonOf' ] )
 {
     if( $computers -and ( $computers.Count -gt 1 -or ( $computers[0] -ne '.' -and $computers[0] -ne $env:COMPUTERNAME ) ) )
@@ -491,7 +494,6 @@ if( $PSBoundParameters[ 'logonOf' ] )
         Write-Verbose "Found $(if( $lsaSessions ) { $lsaSessions.Count } else { 0 }) LSA sessions, earliest session $(if( $earliestSession ) { Get-Date $earliestSession -Format G } else { 'never' })"
 
         ## Now find the requested session
-        $closest = $null
         if( $PSBoundParameters[ 'logonAround' ] )
         {
             [datetime]$targetLogonTime = Get-Date -Date $logonAround -ErrorAction Stop
@@ -807,7 +809,7 @@ else
                                 }
                             }
                         }
-                        else
+                        elseif( $started.NewProcessName )
                         {
                             $exeProperties = Get-ItemProperty -Path $started.NewProcessName -ErrorAction SilentlyContinue
                         }
@@ -970,7 +972,7 @@ if( $listSessions )
 {
     if( $allSessions.Count )
     {
-        $allSessions.GetEnumerator() | Select-Object -ExpandProperty Value | Format-Table -AutoSize
+        $allSessions.GetEnumerator() | Select-Object -ExpandProperty Value | Sort-Object -Property LogonTime -Descending |Select-Object -Property @{n='Logon Time';e={"$(Get-Date -Date $_.LogonTime -Format d) $((Get-Date -Date $_.LogonTime).ToString('HH:mm:ss.ffffff'))"}},@{n='Username';e={"$($_.Domain)\$($_.Username)"}},Computer|Format-Table -AutoSize
     }
     else
     {
@@ -1081,6 +1083,10 @@ else
         #>
 
         [string]$title = "$($processes.Count) process starts $status"
+        if( $closest )
+        {
+            $title += " logon of $($closest.Domain)\$($closest.Username) at $(Get-Date -Date $closest.LoginTime -Format d) $((Get-Date -Date $closest.LoginTime).ToString('HH:mm:ss.ffffff'))"
+        }
         [array]$selected = @( $processes | Select-Object -Property $headings| Out-GridView -PassThru -Title $title )
         if( $selected -and $selected.Count )
         {
