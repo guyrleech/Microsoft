@@ -32,6 +32,8 @@
                       Added -parents and -notparents
 
     04/08/19    GRL   Added -notProcessNames, -notsigned and -nostop
+
+    18/08/19    GRL   Fixed logic bug with -nostop not giving process durations when not specified
 #>
 
 <#
@@ -904,7 +906,7 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
                     }
 
                     ## now find corresponding termination event
-                    if( $noStop )
+                    if( ! $noStop )
                     {
                         $terminate = $endEvents[ [int]$started.NewProcessId ]
                     }
