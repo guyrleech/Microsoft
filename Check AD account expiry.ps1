@@ -5,6 +5,10 @@
     This script is provided as is and with absolutely no warranty such that the author cannot be held responsible for any untoward behaviour or failure of the script.
 
     @guyrleech 2019
+
+    Modification History:
+
+    01/09/19  GRL  Fixed bug with -password and -mailpassword
 #>
 
 <#
@@ -30,8 +34,8 @@ A comma separated list of accounts to ignore
 
 .PARAMETER encryptPassword
 
-Encrypt the password passed by the -password option so it can be passed to -mailHashedPassword. The encrypted password is specific to the user and machine where they are encrypted.
-Pipe through clip.exe or Set-ClipBoard to place in the Windows clipboard
+Encrypt the password passed by the -mailpassword option so it can be passed to -mailHashedPassword. The encrypted password is specific to the user and machine where they are encrypted.
+Pipe through clip.exe or Set-ClipBoard (scb) to place in the Windows clipboard
 
 .PARAMETER mailServer
 
@@ -63,7 +67,7 @@ The username to authenticate with at the mail server
 
 .PARAMETER mailPassword
 
-The password for the -mailUsername argument. If the %_MVal12% environment variable is set then its contents are used for the password
+The clear text password for the -mailUsername argument. If the %_MVal12% environment variable is set then its contents are used for the password
 
 .PARAMETER mailHashedPassword
 
@@ -95,7 +99,7 @@ This will connect to domain controller dc04 and displaly a list of all AD accoun
 
 .EXAMPLE
 
-& '.\Check AD account expiry.ps1' -encryptPassword -password thepassword
+& '.\Check AD account expiry.ps1' -encryptPassword -mailpassword thepassword
 
 This will encrypt the given password and output its encrypted form so that it can be passed as the argument to the -mailHashedPassword option to avoid having to specify the password on the command line.
 The encrypted password will only work for the same user that encrypted it and on the same machine. Email credentials are only required when pass through authentication does not work, e.g. ISP SMTP servers
@@ -134,12 +138,12 @@ Param
 
 if( $encryptPassword )
 {
-    if( ! $PSBoundParameters[ 'mailpassword' ] -and ! ( $password = $env:_Mval12 ) )
+    if( ! $PSBoundParameters[ 'mailpassword' ] -and ! ( $mailPassword = $env:_Mval12 ) )
     {
         Throw 'Must specify the mail username''s password when encrypting via -mailpassword or _Mval12 environment variable'
     }
     
-    ConvertTo-SecureString -AsPlainText -String $password -Force | ConvertFrom-SecureString
+    ConvertTo-SecureString -AsPlainText -String $mailPassword -Force | ConvertFrom-SecureString
     Exit 0
 }
 
