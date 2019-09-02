@@ -6,6 +6,7 @@
     Modification History
 
     24/07/19   GRL   Added -last parameter, defaulted -end if not specified and verification of times/dates
+    02/09/19   GRL   Added -duration
 #>
 
 
@@ -25,6 +26,10 @@ The end time/date to show events from. If no date is given then the current day 
 .PARAMETER last
 
 Show events logged in the preceding period where 's' is seconds, 'm' is minutes, 'h' is hours, 'd' is days, 'w' is weeks and 'y' is years so 12h will retrieve all in the last 12 hours.
+
+.PARAMETER duration
+
+Show events logged from the start specified via -start for the specified period where 's' is seconds, 'm' is minutes, 'h' is hours, 'd' is days, 'w' is weeks and 'y' is years so 2m will retrieve events for 2 minutes from the given start time
 
 .PARAMETER csv
 
@@ -60,6 +65,12 @@ Export all events that occurred between 10:38 and 10:45 on the 29th June 2019 to
 
 Show allevents that occurred in the last 5 minutes on computer "fred" in an on screen gridview
 
+.EXAMPLE
+
+& '.\event aggregator.ps1' -start 10:40 -duration 2m -eventLogs *shell-core/operational*
+
+Show events from the specified event log that occurred between 10:40 and 10:42 today in an on screen gridview
+
 #>
 
 [CmdletBinding()]
@@ -70,6 +81,8 @@ Param
 	[string]$start ,
     [Parameter(ParameterSetName='StartTime',Mandatory=$false,HelpMessage='End time/date for event search')]
 	[string]$end ,
+    [Parameter(ParameterSetName='StartTime',Mandatory=$false,HelpMessage='Duration of the search')]
+	[string]$duration ,
     [Parameter(ParameterSetName='Last',Mandatory=$true,HelpMessage='Search for events in last seconds/minutes/hours/days/weeks/years')]
     [string]$last ,
     [string]$csv ,
@@ -80,20 +93,6 @@ Param
 
 [hashtable]$arguments = @{}
 [string]$command = $null
-
-if( $PSBoundParameters[ 'csv' ] )
-{
-    $arguments += @{
-        'NoTypeInformation' = $true 
-        'NoClobber' = $true 
-        'Path' = $csv }
-    $command = Get-Command -Name Export-Csv
-}
-else
-{
-    $arguments.Add( 'Title' , "From $start to $end" )
-    $command = Get-Command -Name Out-GridView
-}
 
 if( $PSBoundParameters[ 'last' ] )
 {
@@ -129,10 +128,6 @@ if( $PSBoundParameters[ 'last' ] )
     [datetime]$script:start = $end.AddSeconds( -$secondsAgo )
 
 }
-elseif( ! $PSBoundParameters[ 'end' ] )
-{
-    $end = Get-Date
-}
 else
 {
     ## Check time formats as bad ones get stripped by query so search whole event log
@@ -141,7 +136,39 @@ else
     {
         Throw "Invalid start time/date `"$start`""
     }
-    if( ! [datetime]::TryParse( $end , [ref]$parsed ) )
+
+    if( $PSBoundParameters[ 'duration' ] )
+    {
+        if( $PSBoundParameters[ 'end' ] )
+        {
+            Throw 'Cannot use both -duration and -end'
+        }
+        [int]$multiplier = 0
+        switch( $duration[-1] )
+        {
+            's' { $multiplier = 1 }
+            'm' { $multiplier = 60 }
+            'h' { $multiplier = 3600 }
+            'd' { $multiplier = 86400 }
+            'w' { $multiplier = 86400 * 7 }
+            'y' { $multiplier = 86400 * 365 }
+            default { Throw "Unknown multiplier `"$($duration[-1])`"" }
+        }
+        if( $duration.Length -le 1 )
+        {
+            $secondsDuration = $multiplier
+        }
+        else
+        {
+            $secondsDuration = ( ( $duration.Substring( 0 , $duration.Length - 1 ) -as [decimal] ) * $multiplier )
+        }
+        [datetime]$end = $parsed.AddSeconds( $secondsDuration )
+    }
+    elseif( ! $PSBoundParameters[ 'end' ] )
+    {
+        [datetime]$end = Get-Date
+    }
+    elseif( ! [datetime]::TryParse( $end , [ref]$parsed ) )
     {
         Throw "Invalid end time/date `"$start`""
     }
@@ -150,6 +177,20 @@ else
 if( $start -gt $end )
 {
     Throw "Start $(Get-Date -Date $start -Format G) is after end $(Get-Date -Date $end -Format G)"
+}
+
+if( $PSBoundParameters[ 'csv' ] )
+{
+    $arguments += @{
+        'NoTypeInformation' = $true 
+        'NoClobber' = $true 
+        'Path' = $csv }
+    $command = Get-Command -Name Export-Csv
+}
+else
+{
+    $arguments.Add( 'Title' , "From $(Get-Date -Date $start -Format G) to $(Get-Date -Date $end -Format G)" )
+    $command = Get-Command -Name Out-GridView
 }
 
 [hashtable]$eventFilter =  @{ starttime = $start ; endtime = $end }
