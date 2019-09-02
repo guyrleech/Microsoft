@@ -6,7 +6,7 @@
     Modification History
 
     24/07/19   GRL   Added -last parameter, defaulted -end if not specified and verification of times/dates
-    02/09/19   GRL   Added -duration
+    02/09/19   GRL   Added -duration, -overwrite , -nogridview and pass thru for grid view
 #>
 
 
@@ -38,6 +38,14 @@ The name of a non-existent csv file to write the results to. If not specified th
 .PARAMETER badOnly
 
 Only show critical, warning and error events. If not specified then all events will be shown.
+
+.PARAMETER noGridView
+
+Write the events found as objects to the pipeline
+
+.PARAMETER overWrite
+
+Overwrite the csv file if it exists already
 
 .PARAMETER eventLogs
 
@@ -88,8 +96,18 @@ Param
     [string]$csv ,
     [switch]$badOnly ,
     [string]$eventLogs = '*' ,
+    [switch]$noGridView ,
+    [switch]$overWrite ,
     [string]$computer
 )
+
+Function Out-PassThru
+{
+    Process
+    {
+        $_
+    }
+}
 
 [hashtable]$arguments = @{}
 [string]$command = $null
@@ -136,6 +154,11 @@ else
     {
         Throw "Invalid start time/date `"$start`""
     }
+    else
+    {
+        Remove-Variable -Name 'Start'
+        [datetime]$script:start = $parsed
+    }
 
     if( $PSBoundParameters[ 'duration' ] )
     {
@@ -166,11 +189,17 @@ else
     }
     elseif( ! $PSBoundParameters[ 'end' ] )
     {
-        [datetime]$end = Get-Date
+        Remove-Variable -Name 'End'
+        [datetime]$script:end = Get-Date
     }
     elseif( ! [datetime]::TryParse( $end , [ref]$parsed ) )
     {
         Throw "Invalid end time/date `"$start`""
+    }
+    else
+    {
+        Remove-Variable -Name 'End'
+        [datetime]$script:end = $parsed
     }
 }
 
@@ -183,14 +212,20 @@ if( $PSBoundParameters[ 'csv' ] )
 {
     $arguments += @{
         'NoTypeInformation' = $true 
-        'NoClobber' = $true 
+        'NoClobber' = ( ! $overWrite )
         'Path' = $csv }
     $command = Get-Command -Name Export-Csv
 }
-else
+elseif( ! $noGridView )
 {
     $arguments.Add( 'Title' , "From $(Get-Date -Date $start -Format G) to $(Get-Date -Date $end -Format G)" )
+    $arguments.Add( 'PassThru' , $true )
     $command = Get-Command -Name Out-GridView
+}
+else
+{
+    $command = Get-Command -name Out-PassThru
+    $arguments = @{}
 }
 
 [hashtable]$eventFilter =  @{ starttime = $start ; endtime = $end }
@@ -205,4 +240,9 @@ if( $PSBoundParameters[ 'computer' ] -and $computer -ne 'localhost' -and $comput
     $computerArgument.Add( 'ComputerName' , $computer ) ## not the most efficient way of doing this!
 }
 
-Get-WinEvent -ListLog $eventLogs @ComputerArgument | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) }} | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments
+[array]$results = @( Get-WinEvent -ListLog $eventLogs @ComputerArgument | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) }} | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
+
+if( $command -ne 'Export-Csv' )
+{
+    $results
+}
