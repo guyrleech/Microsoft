@@ -6,7 +6,7 @@
     Modification History
 
     24/07/19   GRL   Added -last parameter, defaulted -end if not specified and verification of times/dates
-    02/09/19   GRL   Added -duration, -overwrite , -nogridview and pass thru for grid view
+    02/09/19   GRL   Added -passThru, -duration, -overwrite , -nogridview and pass thru for grid view
 #>
 
 
@@ -46,6 +46,10 @@ Write the events found as objects to the pipeline
 .PARAMETER overWrite
 
 Overwrite the csv file if it exists already
+
+.PARAMETER passThru
+
+Selected items in the grid view when OK is clicked will be placed on the pipeline so can be put on clipboard for example
 
 .PARAMETER eventLogs
 
@@ -98,6 +102,7 @@ Param
     [string]$eventLogs = '*' ,
     [switch]$noGridView ,
     [switch]$overWrite ,
+    [switch]$passThru ,
     [string]$computer
 )
 
@@ -219,7 +224,7 @@ if( $PSBoundParameters[ 'csv' ] )
 elseif( ! $noGridView )
 {
     $arguments.Add( 'Title' , "From $(Get-Date -Date $start -Format G) to $(Get-Date -Date $end -Format G)" )
-    $arguments.Add( 'PassThru' , $true )
+    $arguments.Add( 'PassThru' , $passThru )
     $command = Get-Command -Name Out-GridView
 }
 else
