@@ -37,7 +37,7 @@ The value to set in the registry value when the network profiles are connected a
 
 .PARAMETER pollPeriod
 
-The time in seconds to wait between checks. By default the script will only run once
+The time in seconds to wait between checks. If set to zero then the script will only run once
 
 .PARAMETER noAdminCheck
 
@@ -53,13 +53,13 @@ The string to match when no traffic is flowing over the given interface (do not 
 
 .EXAMPLE
 
-& '.\Network Profile Actioner.ps1' -Verbose -pollPeriod 60 -logFile c:\temp\iper.log
+& '.\Network Profile Actioner.ps1' -Verbose -logFile c:\temp\iper.log
 
-Check the network connection profiles every 60 seconds and make the required changes to the registry value, writing to a log file c:\temp\iper.log
+Check the network connection profiles every 60 seconds (the default) and make the required changes to the registry value, writing to a log file c:\temp\iper.log
 
 .EXAMPLE
 
-& '.\Network Profile Actioner.ps1'
+& '.\Network Profile Actioner.ps1' -pollPeriod 0
 
 Check the network connection profiles once and make the required changes to the registry value and then exit
 
@@ -74,7 +74,7 @@ Param
     [string]$awayNetworks = 'Public' ,
     [int]$homeValue = 1 ,
     [int]$awayValue = 3 ,
-    [int]$pollPeriod = 0 ,
+    [int]$pollPeriod = 60 ,
     [switch]$noAdminCheck ,
     [string]$logFile ,
     [string]$noTraffic = 'NoTraffic'
@@ -146,7 +146,7 @@ Try
             $previousValue = $atHome
         }
 
-        if( $PSBoundParameters[ 'pollPeriod' ] )
+        if( $pollPeriod -gt 0 )
         {
             Start-Sleep -Seconds $pollPeriod
         }
