@@ -34,6 +34,8 @@
     04/08/19    GRL   Added -notProcessNames, -notsigned and -nostop
 
     18/08/19    GRL   Fixed logic bug with -nostop not giving process durations when not specified
+
+    04/09/19    GRL   Fixed bug with -processNames and -notProcessNames
 #>
 
 <#
@@ -743,27 +745,30 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
             Get-WinEvent @remoteParam -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue | ForEach-Object `
             {
                 $event = $_
-                if( ( ! $username -or $event.Properties[ $endSubjectUserName ].Value -match $username ) )
+                if( ( !$PSBoundParameters[ 'username' ] -or $event.Properties[ $endSubjectUserName ].Value -match $username ) )
                 {
                     [bool]$include = $true
-                    if( $processNames -and $processNames.Count )
+                    if( $PSBoundParameters[ 'processNames' ] -and $processNames.Count )
                     {
                         $include = $false
                         ForEach( $processName in $processNames )
                         {
-                            if( $event.Properties[ 5 ].Value -match $processName )
+                            if( $event.Properties[ 6 ].Value -match $processName )
                             {
                                 $include = $true
                                 break
                             }
                         }
                     }
-                    if( $notProcessNames -and $notProcessNames.Count )
+                    if( $PSBoundParameters[ 'notProcessNames' ] -and $notProcessNames.Count )
                     {
-                        $include = $true
+                        if( ! $processNames -or ! $processNames.Count )
+                        {
+                            $include = $true
+                        }
                         ForEach( $notProcessName in $notProcessNames )
                         {
-                            if( $event.Properties[ 5 ].Value -match $notProcessName )
+                            if( $event.Properties[ 6 ].Value -match $notProcessName )
                             {
                                 $include = $false
                                 break
@@ -794,6 +799,10 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
                                 Throw $_
                             }
                         }
+                    }
+                    else
+                    {
+                        Write-Verbose "Excluding Pid $($event.Properties[ $endProcessId ].Value) stop event"
                     }
                 }
             }
@@ -850,7 +859,10 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
                 }
                 if( $notProcessNames -and $notProcessNames.Count )
                 {
-                    $include = $true
+                    if( ! $processNames -or ! $processNames.Count )
+                    {
+                        $include = $true
+                    }
                     ForEach( $notProcessName in $notProcessNames )
                     {
                         if( $event.Properties[ 5 ].Value -match $notProcessName )
