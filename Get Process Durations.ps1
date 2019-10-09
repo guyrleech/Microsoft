@@ -36,6 +36,8 @@
     18/08/19    GRL   Fixed logic bug with -nostop not giving process durations when not specified
 
     04/09/19    GRL   Fixed bug with -processNames and -notProcessNames
+
+    09/10/19    GRL   Added -duration parameter
 #>
 
 <#
@@ -123,6 +125,10 @@ Output the results to the pipeline rather than a grid view
 
 Do not include processes run by the system account
 
+.PARAMETER duration
+
+Show events logged from the start specified via -start for the specified period where 's' is seconds, 'm' is minutes, 'h' is hours, 'd' is days, 'w' is weeks and 'y' is years so 2m will retrieve events for 2 minutes from the given start time
+
 .PARAMETER noFileInfo
 
 Do not include exe file information
@@ -204,6 +210,7 @@ Param
     [string]$start ,
     [string]$end ,
     [string]$last ,
+	[string]$duration ,
     [string]$eventLog ,
     [string]$logonOf ,
     [int]$beforeSeconds = 30 ,
@@ -616,7 +623,39 @@ if( $PSBoundParameters[ 'start' ] )
     $startEventFilter.Add( 'StartTime' , (Get-Date -Date $start ))
 }
 
-if( $PSBoundParameters[ 'end' ] )
+if( $PSBoundParameters[ 'duration' ] )
+{
+    if( $PSBoundParameters[ 'end' ] )
+    {
+        Throw 'Cannot use both -duration and -end'
+    }
+    if( ! $startEventFilter[ 'StartTime' ] )
+    {
+        Throw 'Must specify -start when using -duration'
+    }
+
+    [int]$multiplier = 0
+    switch( $duration[-1] )
+    {
+        's' { $multiplier = 1 }
+        'm' { $multiplier = 60 }
+        'h' { $multiplier = 3600 }
+        'd' { $multiplier = 86400 }
+        'w' { $multiplier = 86400 * 7 }
+        'y' { $multiplier = 86400 * 365 }
+        default { Throw "Unknown multiplier `"$($duration[-1])`"" }
+    }
+    if( $duration.Length -le 1 )
+    {
+        $secondsDuration = $multiplier
+    }
+    else
+    {
+        $secondsDuration = ( ( $duration.Substring( 0 , $duration.Length - 1 ) -as [decimal] ) * $multiplier )
+    }
+    $startEventFilter.Add( 'EndTime' , ( $startEventFilter[ 'StartTime' ]).AddSeconds( $secondsDuration ))
+}
+elseif( $PSBoundParameters[ 'end' ] )
 {
     $startEventFilter.Add( 'EndTime' , (Get-Date -Date $end ))
 }
