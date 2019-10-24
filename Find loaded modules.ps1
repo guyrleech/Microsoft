@@ -3,6 +3,10 @@
     Show processes with a given module loaded
 
     @guyrleech 2019
+
+    Modification History:
+
+    24/10/19   GRL    Added -companyName parameter
 #>
 
 <#
@@ -17,6 +21,10 @@ Designed to help spot processes hooked by 3rd party software like Citrix, Ivanti
 .PARAMETER moduleName
 
 The name of the module or regex to match. Also specify -regex when the module name is a regex
+
+.PARAMETER companyName
+
+The name of the company or a regex to match it
 
 .PARAMETER processName
 
@@ -70,11 +78,14 @@ Show all modules loaded into all processes running as 32 or 64 bit. Pipe through
 
 Param
 (
-    [Parameter(Mandatory=$true,HelpMessage='Module name to search for')]
+    [Parameter(Mandatory=$true,HelpMessage='Module name to search for',ParameterSetName='Module')]
     [string]$moduleName ,
+    [Parameter(Mandatory=$true,HelpMessage='Module name to search for',ParameterSetName='Company')]
+    [string]$companyName ,
     [string]$processName ,
     [int]$processId ,
     [switch]$quiet ,
+    [Parameter(Mandatory=$false,ParameterSetName='Module')]
     [switch]$regex ,
     [switch]$noUsername ,
     [switch]$noOtherBitness ,
@@ -153,7 +164,7 @@ Write-Verbose "PowerShell is 32 bit - $powerShellis32bit"
 
         ForEach( $module in $process.Modules )
         {
-            if( $module.FileName -match $escapedModuleName )
+            if( ( $moduleName -and $module.FileName -match $escapedModuleName ) -or ( $companyName -and $module.FileVersionInfo -and $module.FileVersionInfo.CompanyName -match $companyName ) )
             {
                 if( ! $processProperties )
                 {
