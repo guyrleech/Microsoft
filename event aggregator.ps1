@@ -7,6 +7,8 @@
 
     24/07/19   GRL   Added -last parameter, defaulted -end if not specified and verification of times/dates
     02/09/19   GRL   Added -passThru, -duration, -overwrite , -nogridview and pass thru for grid view
+    17/09/19   GRL   Extra parameter validation
+    12/12/19   GRL   Added -ids , -excludeProvider and -excludeIds parameters
 #>
 
 
@@ -30,6 +32,18 @@ Show events logged in the preceding period where 's' is seconds, 'm' is minutes,
 .PARAMETER duration
 
 Show events logged from the start specified via -start for the specified period where 's' is seconds, 'm' is minutes, 'h' is hours, 'd' is days, 'w' is weeks and 'y' is years so 2m will retrieve events for 2 minutes from the given start time
+
+.PARAMETER ids
+
+only include events which have ids in this comma separated list of event ids
+
+.PARAMETER excludeids
+
+Exclude events which have ids in this comma separated list of event ids
+
+.PARAMETER excludeProvider
+
+Exclude events from any provider which matches this regular expression
 
 .PARAMETER csv
 
@@ -83,6 +97,12 @@ Show allevents that occurred in the last 5 minutes on computer "fred" in an on s
 
 Show events from the specified event log that occurred between 10:40 and 10:42 today in an on screen gridview
 
+.EXAMPLE
+
+& '.\event aggregator.ps1' -start 10:40 -duration 2m -excludeids 405,3209 -excludeProvider 'kernel|security'
+
+Show events from the specified event log that occurred between 10:40 and 10:42 today in an on screen gridview but exclude events with ids 405 or 3209 and exclude events which match the regular expression so where the provider matches 'kernel' or 'security'
+
 #>
 
 [CmdletBinding()]
@@ -97,6 +117,9 @@ Param
 	[string]$duration ,
     [Parameter(ParameterSetName='Last',Mandatory=$true,HelpMessage='Search for events in last seconds/minutes/hours/days/weeks/years')]
     [string]$last ,
+    [int[]]$ids ,
+    [int[]]$excludeIds ,
+    [string]$excludeProvider ,
     [string]$csv ,
     [switch]$badOnly ,
     [string]$eventLogs = '*' ,
@@ -213,6 +236,11 @@ if( $start -gt $end )
     Throw "Start $(Get-Date -Date $start -Format G) is after end $(Get-Date -Date $end -Format G)"
 }
 
+if( $start -gt (Get-Date) )
+{
+    Write-Warning "Start $(Get-Date -Date $start -Format G) is in the future by $([math]::Round(($start - (Get-Date)).TotalHours,1)) hours"
+}
+
 if( $PSBoundParameters[ 'csv' ] )
 {
     $arguments += @{
@@ -245,7 +273,13 @@ if( $PSBoundParameters[ 'computer' ] -and $computer -ne 'localhost' -and $comput
     $computerArgument.Add( 'ComputerName' , $computer ) ## not the most efficient way of doing this!
 }
 
-[array]$results = @( Get-WinEvent -ListLog $eventLogs @ComputerArgument | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) }} | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
+if( $PSBoundParameters[ 'ids' ] )
+{
+    $eventFilter.Add( 'ID' , $ids )
+}
+
+[array]$results = @( Get-WinEvent -ListLog $eventLogs @ComputerArgument | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
+    Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) }}} | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
 
 if( $command -ne 'Export-Csv' )
 {
