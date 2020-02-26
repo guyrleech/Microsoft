@@ -279,7 +279,7 @@ $results = New-Object -TypeName System.Collections.Generic.List[psobject]
 [array]$results = @( $(ForEach( $thisComputer in $Computer )
 {
     $counter++
-    Write-Verbose -Verbose "$counter / $($computer.Count) : $thiscomputer"
+    Write-Verbose -Message "$counter / $($computer.Count) : $thiscomputer"
 
     [hashtable]$computerArgument = @{}
     if( $thisComputer -ne 'localhost' -and $thisComputer -ne $env:COMPUTERNAME -and $thisComputer -ne '.' )
