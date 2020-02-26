@@ -9,6 +9,7 @@
     02/09/19   GRL   Added -passThru, -duration, -overwrite , -nogridview and pass thru for grid view
     17/09/19   GRL   Extra parameter validation
     12/12/19   GRL   Added -ids , -excludeProvider and -excludeIds parameters
+    26/02/20   GRL   Changed -computer to take array
 #>
 
 
@@ -71,7 +72,7 @@ A pattern matching the event logs to search. By default all event logs are searc
 
 .PARAMETER computer
 
-A remote computer to query. If not specified then the local computer is used.
+One or more remote computers to query. If not specified then the local computer is used.
 
 .EXAMPLE
 
@@ -87,9 +88,9 @@ Export all events that occurred between 10:38 and 10:45 on the 29th June 2019 to
 
 .EXAMPLE
 
-& '.\event aggregator.ps1' -last 5m -Computer fred
+& '.\event aggregator.ps1' -last 5m -Computers fred,bloggs
 
-Show allevents that occurred in the last 5 minutes on computer "fred" in an on screen gridview
+Show allevents that occurred in the last 5 minutes on computers "fred" and "bloggs" in an on screen gridview
 
 .EXAMPLE
 
@@ -126,7 +127,7 @@ Param
     [switch]$noGridView ,
     [switch]$overWrite ,
     [switch]$passThru ,
-    [string]$computer
+    [string[]]$computer = @( 'localhost' )
 )
 
 Function Out-PassThru
@@ -267,21 +268,30 @@ if( $badOnly )
     $eventFilter.Add( 'Level' , @( 1 , 2 , 3 ) )
 }
 
-[hashtable]$computerArgument = @{}
-if( $PSBoundParameters[ 'computer' ] -and $computer -ne 'localhost' -and $computer -ne $env:COMPUTERNAME )
-{
-    $computerArgument.Add( 'ComputerName' , $computer ) ## not the most efficient way of doing this!
-}
-
 if( $PSBoundParameters[ 'ids' ] )
 {
     $eventFilter.Add( 'ID' , $ids )
 }
 
-[array]$results = @( Get-WinEvent -ListLog $eventLogs @ComputerArgument | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
-    Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) }}} | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
+$results = New-Object -TypeName System.Collections.Generic.List[psobject]
+[int]$counter = 0
 
-if( $command -ne 'Export-Csv' )
+[array]$results = @( $(ForEach( $thisComputer in $Computer )
+{
+    $counter++
+    Write-Verbose -Verbose "$counter / $($computer.Count) : $thiscomputer"
+
+    [hashtable]$computerArgument = @{}
+    if( $thisComputer -ne 'localhost' -and $thisComputer -ne $env:COMPUTERNAME -and $thisComputer -ne '.' )
+    {
+        $computerArgument.Add( 'ComputerName' , $thisComputer ) ## not the most efficient way of doing this but it's better than having to do it manually!
+    }
+
+    Get-WinEvent -ListLog $eventLogs @ComputerArgument -Verbose:$false | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -Verbose:$False -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
+        Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) }}}
+}) |  Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
+
+if( $command -ne 'Export-CSV' )
 {
     $results
 }
