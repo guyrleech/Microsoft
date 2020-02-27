@@ -1,4 +1,4 @@
-<#
+﻿<#
     Get all events from all event logs in a given time window and output to grid view or csv
 
     @guyrleech 2019
@@ -10,6 +10,7 @@
     17/09/19   GRL   Extra parameter validation
     12/12/19   GRL   Added -ids , -excludeProvider and -excludeIds parameters
     26/02/20   GRL   Changed -computer to take array
+    27/02/20   GRL   Added -message and -ignore parameters
 #>
 
 
@@ -33,6 +34,14 @@ Show events logged in the preceding period where 's' is seconds, 'm' is minutes,
 .PARAMETER duration
 
 Show events logged from the start specified via -start for the specified period where 's' is seconds, 'm' is minutes, 'h' is hours, 'd' is days, 'w' is weeks and 'y' is years so 2m will retrieve events for 2 minutes from the given start time
+
+.PARAMETER message
+
+Only include events where the message matches the regular expression specified
+
+.PARAMETER ignore
+
+Exclude events where the message matches the regular expression specified
 
 .PARAMETER ids
 
@@ -121,6 +130,8 @@ Param
     [int[]]$ids ,
     [int[]]$excludeIds ,
     [string]$excludeProvider ,
+    [string]$message ,
+    [string]$ignore ,
     [string]$csv ,
     [switch]$badOnly ,
     [string]$eventLogs = '*' ,
@@ -288,10 +299,11 @@ $results = New-Object -TypeName System.Collections.Generic.List[psobject]
     }
 
     Get-WinEvent -ListLog $eventLogs @ComputerArgument -Verbose:$false | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -Verbose:$False -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
-        Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) }}}
+        Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) -and ( ! $message -or $_.message -match $message ) -and ( ! $ignore -or $_.message -notmatch $ignore ) }}}
 }) |  Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
 
 if( $command -ne 'Export-CSV' )
 {
     $results
 }
+
