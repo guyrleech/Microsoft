@@ -9,7 +9,7 @@ Look at specified executables and show their executable type
 
 Executables have a PE header which contains the machine type they run on so this script fetches this and translates to a human readable description, if the file is an executable and has a PE header
 
-.PARAMETER files
+.PARAMETER fullname
 
 Comma separated list of files to examine
 
@@ -31,7 +31,7 @@ Do not report errors such as not being able to open the file or it not being an 
 
 .EXAMPLE
 
-& '.\Get file bitness.ps1' -file file1.exe,file2.exe 
+& '.\Get file bitness.ps1' -fullname file1.exe,file2.exe 
 
 Show the bitness of file1.exe and file2.exe in the current folder
 
@@ -41,26 +41,42 @@ Show the bitness of file1.exe and file2.exe in the current folder
 
 Show the bitness of all executable files found in the c:\temp folder and subfolders but do not report any errors such as a file not being an executable
 
+.EXAMPLE
+
+dir "c:\program files*" -Recurse -Filter *.exe -force -ErrorAction SilentlyContinue | & '.\Get file bitness.ps1' -quiet -dotnetOnly|Out-GridView
+
+Show the bitness of all .NET exe files found in the "c:\program files*" folder and subfolders but do not report any errors such as a file not being an executable. 
+Display the results in a sortable/filterable grid view
+
 .NOTES
 
 Based on code from @shaylevy although at the time of writing the script is flawed as it doesn't read enough data from the file to read the PE header
 
 https://www.powershellmagazine.com/2013/03/08/pstip-how-to-determine-if-a-file-is-32bit-or-64bit/
 
+Modification History
+
+  22/01/2020  @guyrleech  Initial release
+  27/04/2020  @guyrleech  Added calls to [System.Reflection.Assembly]::ReflectionOnlyLoadFrom() and [System.Reflection.AssemblyName]::GetAssemblyName() to get .NET specific information
+  28/04/2020  @guyrleech  Changed -files parameter to -fullname so can pipe from Get-ChildItem
+                          Added -dotnetOnly parameter
+                          Added .NET version to output
+                          Changed properties to not start .NET as Out-GridView ignores them
 #>
 
 [CmdletBinding()]
 
 Param
 (
-    [Parameter(Mandatory=$true,ParameterSetName='files',HelpMessage='Comma separated list of files to process',ValueFromPipeline=$true)]
-    [string[]]$files ,
+    [Parameter(Mandatory=$true,ParameterSetName='files',HelpMessage='Comma separated list of files to process',ValueFromPipelineByPropertyName=$true)]
+    [string[]]$fullname ,
     [Parameter(Mandatory=$true,ParameterSetName='folders',HelpMessage='Comma separated list of folders to process')]
     [string[]]$folders ,
     [Parameter(Mandatory=$false,ParameterSetName='folders')]
     [switch]$recurse ,
     [switch]$explain ,
-    [switch]$quiet
+    [switch]$quiet ,
+    [switch]$dotnetOnly
 )
 
 Begin
@@ -117,7 +133,7 @@ Begin
 
     If( $PSBoundParameters[ 'folders' ] )
     {
-        $files = @( ForEach( $folder in $folders )
+        $fullname = @( ForEach( $folder in $folders )
         {
             Get-ChildItem -Path $folder -File -Recurse:$recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
         })
@@ -126,22 +142,8 @@ Begin
 
 Process
 {
-    ForEach( $file in $files )
+    ForEach( $file in $fullname )
     {
-        $data = New-Object System.Byte[] 4096
-        Try
-        {
-            $stream = New-Object System.IO.FileStream -ArgumentList $file,Open,Read
-        }
-        Catch
-        {
-            $stream = $null
-            if( ! $quiet )
-            {
-                Write-Error -Exception $_
-            }
-        }
-
         Try
         {
             $runtimeAssembly = [System.Reflection.Assembly]::ReflectionOnlyLoadFrom( $file )
@@ -160,66 +162,84 @@ Process
             $assembly = $null
         }
 
-        If( $stream )
+        if( ! $dotnetOnly -or ( $assembly -and $runtimeAssembly ) )
         {
-            [uint16]$machineUint = 0xffff
-            [int]$read = $stream.Read( $data , 0 ,$data.Count )
-            If( $read -gt $PE_POINTER_OFFSET )
+            $data = New-Object System.Byte[] 4096
+            Try
             {
-                If( $data[0] -eq 0x4d -and $data[1] -eq 0x5a ) ## MZ
+                $stream = New-Object System.IO.FileStream -ArgumentList $file,Open,Read
+            }
+            Catch
+            {
+                $stream = $null
+                if( ! $quiet )
                 {
-                    [int]$PE_HEADER_ADDR = [System.BitConverter]::ToInt32( $data, $PE_POINTER_OFFSET )
-                    [int]$typeOffset = $PE_HEADER_ADDR + $MACHINE_OFFSET
-                    If( $data[ $PE_HEADER_ADDR ] -eq 0x50 -and $data[ $PE_HEADER_ADDR + 1 ] -eq 0x45 ) ## PE
+                    Write-Error -Exception $_
+                }
+            }
+
+            If( $stream )
+            {
+                [uint16]$machineUint = 0xffff
+                [int]$read = $stream.Read( $data , 0 ,$data.Count )
+                If( $read -gt $PE_POINTER_OFFSET )
+                {
+                    If( $data[0] -eq 0x4d -and $data[1] -eq 0x5a ) ## MZ
                     {
-                        If( $read -gt $typeOffset + [System.Runtime.InteropServices.Marshal]::SizeOf( $machineUint ) )
+                        [int]$PE_HEADER_ADDR = [System.BitConverter]::ToInt32( $data, $PE_POINTER_OFFSET )
+                        [int]$typeOffset = $PE_HEADER_ADDR + $MACHINE_OFFSET
+                        If( $data[ $PE_HEADER_ADDR ] -eq 0x50 -and $data[ $PE_HEADER_ADDR + 1 ] -eq 0x45 ) ## PE
                         {
-                            [uint16]$machineUint = [System.BitConverter]::ToUInt16( $data, $typeOffset )
-                            $versionInfo = Get-ItemProperty -Path $file -ErrorAction SilentlyContinue | Select-Object -ExpandProperty VersionInfo
-                            If( $runtimeAssembly -and ( $module = ($runtimeAssembly.GetModules() | Select -First 1) ) )
+                            If( $read -gt $typeOffset + [System.Runtime.InteropServices.Marshal]::SizeOf( $machineUint ) )
                             {
-                                $pekinds = New-Object -TypeName System.Reflection.PortableExecutableKinds
-                                $imageFileMachine = New-Object -TypeName System.Reflection.ImageFileMachine
-                                $module.GetPEKind( [ref]$pekinds , [ref]$imageFileMachine )
+                                [uint16]$machineUint = [System.BitConverter]::ToUInt16( $data, $typeOffset )
+                                $versionInfo = Get-ItemProperty -Path $file -ErrorAction SilentlyContinue | Select-Object -ExpandProperty VersionInfo
+                                If( $runtimeAssembly -and ( $module = ($runtimeAssembly.GetModules() | Select -First 1) ) )
+                                {
+                                    $pekinds = New-Object -TypeName System.Reflection.PortableExecutableKinds
+                                    $imageFileMachine = New-Object -TypeName System.Reflection.ImageFileMachine
+                                    $module.GetPEKind( [ref]$pekinds , [ref]$imageFileMachine )
+                                }
+                                Else
+                                {
+                                    $pekinds = $null
+                                    $imageFileMachine = $null
+                                }
+
+                                [pscustomobject][ordered]@{
+                                    'File' = $file
+                                    'Architecture' = $machineTypes[ [int]$machineUint ]
+                                    'NET Architecture' = $(If( $assembly ) { $processorAchitectures[ $assembly.ProcessorArchitecture.ToString() ] } else { 'Not .NET' } )
+                                    'NET PE Kind' = $( If( $pekinds ) { if( $explain ) { ($pekinds.ToString() -split ',\s?' | ForEach-Object { $pekindsExplanations[ $_ ] }) -join ',' } else { $pekinds.ToString() } }  else { 'Not .NET' } )
+                                    'NET Platform' = $(If( $imageFileMachine ) { $processorAchitectures[ $imageFileMachine.ToString() ] } else { 'Not .NET' } )
+                                    'NET Runtime Version' = $(If( $runtimeAssembly ) { $runtimeAssembly.ImageRuntimeVersion } else { 'Not .NET' } )
+                                    'Company' = $versionInfo | Select-Object -ExpandProperty CompanyName
+                                    'File Version' = $versionInfo | Select-Object -ExpandProperty FileVersionRaw
+                                    'Product Name' = $versionInfo | Select-Object -ExpandProperty ProductName
+                                }
                             }
                             Else
                             {
-                                $pekinds = $null
-                                $imageFileMachine = $null
-                            }
-
-                            [pscustomobject][ordered]@{
-                                'File' = $file
-                                'Architecture' = $machineTypes[ [int]$machineUint ]
-                                '.NET Architecture' = $(If( $assembly ) { $processorAchitectures[ $assembly.ProcessorArchitecture.ToString() ] } else { 'Not .NET' } )
-                                '.NET PE Kind' = $( If( $pekinds ) { if( $explain ) { ($pekinds.ToString() -split ',\s?' | ForEach-Object { $pekindsExplanations[ $_ ] }) -join ',' } else { $pekinds.ToString() } }  else { 'Not .NET' } )
-                                '.NET Platform' = $(If( $imageFileMachine ) { $processorAchitectures[ $imageFileMachine.ToString() ] } else { 'Not .NET' } )
-                                'Company' = $versionInfo | Select-Object -ExpandProperty CompanyName
-                                'File Version' = $versionInfo | Select-Object -ExpandProperty FileVersionRaw
-                                'Product Name' = $versionInfo | Select-Object -ExpandProperty ProductName
+                                Write-Warning "Only read $($data.Count) bytes from `"$file`" so can't reader header at offset $typeOffset"
                             }
                         }
-                        Else
+                        ElseIf( ! $quiet )
                         {
-                            Write-Warning "Only read $($data.Count) bytes from `"$file`" so can't reader header at offset $typeOffset"
+                            Write-Warning "`"$file`" does not have a PE header signature"
                         }
                     }
                     ElseIf( ! $quiet )
                     {
-                        Write-Warning "`"$file`" does not have a PE header signature"
+                        Write-Warning "`"$file`" is not an executable"
                     }
                 }
                 ElseIf( ! $quiet )
                 {
-                    Write-Warning "`"$file`" is not an executable"
+                    Write-Warning "Only read $read bytes from `"$file`", not enough to get header at $PE_POINTER_OFFSET"
                 }
+                $stream.Close()
+                $stream = $null
             }
-            ElseIf( ! $quiet )
-            {
-                Write-Warning "Only read $read bytes from `"$file`", not enough to get header at $PE_POINTER_OFFSET"
-            }
-            $stream.Close()
-            $stream = $null
         }
     }
 }
