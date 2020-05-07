@@ -207,6 +207,7 @@ Param
     [string]$username ,
     [string[]]$processNames ,
     [string[]]$notProcessNames ,
+    [string[]]$pids ,
     [string]$start ,
     [string]$end ,
     [string]$last ,
@@ -380,6 +381,58 @@ Function Get-AuditSetting
     {
         Write-Warning "Unable to determine audit setting"
     }
+}
+
+## http://powershell.one/tricks/performance/pipeline from @TobiasPSP
+function Foreach-ObjectFast
+{
+  param
+  (
+    [ScriptBlock]
+    $Process,
+    
+    [ScriptBlock]
+    $Begin,
+    
+    [ScriptBlock]
+    $End
+  )
+  
+  begin
+  {
+    # construct a hard-coded anonymous simple function from
+    # the submitted scriptblocks:
+    $code = @"
+& {
+  begin
+  {
+    $Begin
+  }
+  process
+  {
+    $Process
+  }
+  end
+  {
+    $End
+  }
+}
+"@
+    # turn code into a scriptblock and invoke it
+    # via a steppable pipeline so we can feed in data
+    # as it comes in via the pipeline:
+    $pip = [ScriptBlock]::Create($code).GetSteppablePipeline()
+    $pip.Begin($true)
+  }
+  process 
+  {
+    # forward incoming pipeline data to the custom scriptblock:
+    $pip.Process($_)
+  }
+  end
+  {
+    $pip.End()
+  }
 }
 
 [datetime]$startTime = Get-Date
@@ -677,23 +730,31 @@ else
 }
 
 ## If called via scheduled task, arrays aren't passed as arrarys so split back out
-if( $processNames -and $processNames -and $processNames.Count -and $processNames[0].IndexOf( ',' ) -ge 0 )
+if( $processNames -and $processNames.Count -and $processNames[0].IndexOf( ',' ) -ge 0 )
 {
     $processNames = $processNames -split ','
 }
-if( $notProcessNames -and $notProcessNames -and $notProcessNames.Count -and $notProcessNames[0].IndexOf( ',' ) -ge 0 )
+if( $pids -and $pids.Count -and $pids[0].IndexOf( ',' ) -ge 0 )
+{
+    [int[]]$pids = [int[]]$pids -split ','
+}
+else
+{
+    [int[]]$pids = $pids
+}
+if( $notProcessNames -and $notProcessNames.Count -and $notProcessNames[0].IndexOf( ',' ) -ge 0 )
 {
     $notProcessNames = $notProcessNames -split ','
 }
-if( $computers -and $computers -and $computers.Count -and $computers[0].IndexOf( ',' ) -ge 0 )
+if( $computers -and $computers.Count -and $computers[0].IndexOf( ',' ) -ge 0 )
 {
     $computers = $computers -split ','
 }
-if( $parents -and $parents -and $parents.Count -and $parents[0].IndexOf( ',' ) -ge 0 )
+if( $parents -and $parents.Count -and $parents[0].IndexOf( ',' ) -ge 0 )
 {
     $parents = $parents -split ','
 }
-if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 )
+if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 )
 {
     $notParents = $notParents -split ','
 }
@@ -781,7 +842,7 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
             [hashtable]$stopEventFilter = $startEventFilter.Clone()
             $stopEventFilter[ 'Id' ] = 4689
 
-            Get-WinEvent @remoteParam -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue | ForEach-Object `
+            Get-WinEvent @remoteParam -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue | . { Process `
             {
                 $event = $_
                 if( ( !$PSBoundParameters[ 'username' ] -or $event.Properties[ $endSubjectUserName ].Value -match $username ) )
@@ -798,6 +859,10 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
                                 break
                             }
                         }
+                    }
+                    if( $pids -and $pids.Count )
+                    {
+                        $include = $pids -contains $event.Properties[ 5 ].Value 
                     }
                     if( $PSBoundParameters[ 'notProcessNames' ] -and $notProcessNames.Count )
                     {
@@ -844,7 +909,7 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
                         Write-Verbose "Excluding Pid $($event.Properties[ $endProcessId ].Value) stop event"
                     }
                 }
-            }
+            }}
         }
 
         Write-Verbose "Got $($endEvents.Count) + $multiplePids end events from $computer"
@@ -877,11 +942,11 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
         }
 
         ## Find all process starts then we'll look for the corresponding stops
-        Get-WinEvent @remoteParam -FilterHashtable $startEventFilter -Oldest -ErrorAction SilentlyContinue -ErrorVariable 'eventError'  | ForEach-Object `
+        Get-WinEvent @remoteParam -FilterHashtable $startEventFilter -Oldest -ErrorAction SilentlyContinue -ErrorVariable 'eventError' | . { Process `
         {
             $event = $_
             if( ( ! $username -or $event.Properties[ 1 ].Value -match $username ) -and ( ! $excludeSystem -or ( $event.Properties[ 1 ].Value -ne $machineAccount `
-                -and $event.Properties[ 1 ].Value -ne '-' )) -and ( ! $elevated -or $event.Properties[ 6 ].Value -eq '%%1937' ) )
+                -and $event.Properties[ 1 ].Value -ne '-' )) -and ( ! $elevated -or $event.Properties[ 6 ].Value -eq '%%1937' ) -and ( ! $pids -or $pids -contains $event.Properties[ 4 ].Value ) )
             {
                 [bool]$include = $true
                 if( $processNames -and $processNames.Count )
@@ -896,6 +961,12 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
                         }
                     }
                 }
+                <#
+                if( $PSBoundParameters[ 'pids' ] -and $pids.Count )
+                {
+                    $include = $event.Properties[ 6 ].Value -in $pids
+                }
+                #>
                 if( $notProcessNames -and $notProcessNames.Count )
                 {
                     if( ! $processNames -or ! $processNames.Count )
@@ -1022,13 +1093,13 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
                                 {
                                     ## This is a deserialised object which doesn't seem to persist new properties added so we will make a local copy
                                     $exeProperties = New-Object -TypeName 'PSCustomObject'
-                                    $result.PSObject.Properties | Where-Object MemberType -Match 'property$' | ForEach-Object `
+                                    $result.PSObject.Properties | Where-Object MemberType -Match 'property$' | Foreach-ObjectFast `
                                     {
                                         if( $_.Name -eq 'VersionInfo' ) ## has been flattened into a string so need to unflatten
                                         {
                                             [int]$added = 0
                                             $versionInfo = New-Object -TypeName 'PSCustomObject'
-                                            $_.Value -split "`n" | ForEach-Object `
+                                            $_.Value -split "`n" | Foreach-ObjectFast `
                                             {
                                                 [string[]]$split = $_ -split ':',2 ## will be : in file names so only split on first
                                                 if( $split -and $split.Count -eq 2 )
@@ -1177,7 +1248,7 @@ if( $notParents -and $notParents -and $notParents.Count -and $notParents[0].Inde
                     }
                 }
             }
-        }
+        }}
 
         if( $eventError )
         {
@@ -1245,7 +1316,7 @@ if( ! $processes.Count )
 }
 elseif( $summary )
 {
-    $output = @( $fileProperties.GetEnumerator() | ForEach-Object `
+    $output = @( $fileProperties.GetEnumerator() | Foreach-ObjectFast `
     {
         $exeFile = $_.Value
         [pscustomobject][ordered]@{
