@@ -11,6 +11,7 @@
     12/12/19   GRL   Added -ids , -excludeProvider and -excludeIds parameters
     26/02/20   GRL   Changed -computer to take array
     27/02/20   GRL   Added -message and -ignore parameters
+    03/06/20   GRL   Added -boot option
 #>
 
 
@@ -119,13 +120,17 @@ Show events from the specified event log that occurred between 10:40 and 10:42 t
 
 Param
 (
-    [Parameter(ParameterSetName='StartTime',Mandatory=$true,HelpMessage='Start time/date for event search')]
+    [Parameter(ParameterSetName='BootTime' ,Mandatory,HelpMessage='Start from boot time')]
+    [switch]$boot ,
+    [Parameter(ParameterSetName='StartTime',Mandatory,HelpMessage='Start time/date for event search')]
 	[string]$start ,
-    [Parameter(ParameterSetName='StartTime',Mandatory=$false,HelpMessage='End time/date for event search')]
+    [Parameter(ParameterSetName='StartTime')]
+    [Parameter(ParameterSetName='BootTime')]
 	[string]$end ,
-    [Parameter(ParameterSetName='StartTime',Mandatory=$false,HelpMessage='Duration of the search')]
+    [Parameter(ParameterSetName='StartTime')]
+    [Parameter(ParameterSetName='BootTime')]
 	[string]$duration ,
-    [Parameter(ParameterSetName='Last',Mandatory=$true,HelpMessage='Search for events in last seconds/minutes/hours/days/weeks/years')]
+    [Parameter(ParameterSetName='Last',Mandatory,HelpMessage='Search for events in last seconds/minutes/hours/days/weeks/years')]
     [string]$last ,
     [int[]]$ids ,
     [int[]]$excludeIds ,
@@ -154,9 +159,9 @@ Function Out-PassThru
 
 if( $PSBoundParameters[ 'last' ] )
 {
-    if( $PSBoundParameters[ 'start' ] -or $PSBoundParameters[ 'end' ] )
+    if( $PSBoundParameters[ 'start' ] -or $PSBoundParameters[ 'end' ] -or $PSBoundParameters[ 'boot' ] )
     {
-        Throw 'Cannot use -start or -end with -last'
+        Throw 'Cannot use -start, -boot or -end with -last'
     }
 
     ## see what last character is as will tell us what units to work with
@@ -188,13 +193,29 @@ if( $PSBoundParameters[ 'last' ] )
 }
 else
 {
-    ## Check time formats as bad ones get stripped by query so search whole event log
-    $parsed = New-Object -TypeName 'DateTime'
-    if( ! [datetime]::TryParse( $start , [ref]$parsed ) )
+    $parsed = $null
+    if( $PSBoundParameters[ 'boot' ] )
     {
-        Throw "Invalid start time/date `"$start`""
+        if( $lastbooted = Get-WmiObject -Class Win32_operatingsystem | Select-Object -ExpandProperty LastBootUpTime )
+        {
+            $parsed = ([WMI] '').ConvertToDateTime( $lastbooted )
+        }
+        else
+        {
+            Throw 'Failed to get last boot time via WMI'
+        }
     }
     else
+    {
+        ## Check time formats as bad ones get stripped by query so search whole event log
+        $parsed = New-Object -TypeName 'DateTime'
+        if( ! [datetime]::TryParse( $start , [ref]$parsed ) )
+        {
+            Throw "Invalid start time/date `"$start`""
+        }
+    }
+
+    if( $parsed )
     {
         Remove-Variable -Name 'Start'
         [datetime]$script:start = $parsed
@@ -299,8 +320,8 @@ $results = New-Object -TypeName System.Collections.Generic.List[psobject]
     }
 
     Get-WinEvent -ListLog $eventLogs @ComputerArgument -Verbose:$false | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -Verbose:$False -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
-        Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) -and ( ! $message -or $_.message -match $message ) -and ( ! $ignore -or $_.message -notmatch $ignore ) }}}
-}) |  Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
+        Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) -and ( ! $message -or $_.message -match $message ) -and ( ! $ignore -or $_.message -notmatch $ignore ) }}}}
+) | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
 
 if( $command -ne 'Export-CSV' )
 {
