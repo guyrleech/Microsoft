@@ -12,6 +12,7 @@
     26/02/20   GRL   Changed -computer to take array
     27/02/20   GRL   Added -message and -ignore parameters
     03/06/20   GRL   Added -boot option
+    05/06/20   GRL   Added user name,sid, pid and tid
 #>
 
 
@@ -321,10 +322,9 @@ $results = New-Object -TypeName System.Collections.Generic.List[psobject]
 
     Get-WinEvent -ListLog $eventLogs @ComputerArgument -Verbose:$false | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -Verbose:$False -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
         Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) -and ( ! $message -or $_.message -match $message ) -and ( ! $ignore -or $_.message -notmatch $ignore ) }}}}
-) | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,?*Id,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},* | . $command @arguments )
+) | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,RecordId,ProviderId,*ActivityId,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},*,@{n='User';e={if( $_.UserId ) { ([System.Security.Principal.SecurityIdentifier]($_.UserId)).Translate([System.Security.Principal.NTAccount]).Value }}} | . $command @arguments )
 
 if( $command -ne 'Export-CSV' )
 {
     $results
 }
-
