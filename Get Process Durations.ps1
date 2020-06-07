@@ -38,6 +38,13 @@
     04/09/19    GRL   Fixed bug with -processNames and -notProcessNames
 
     09/10/19    GRL   Added -duration parameter
+
+    03/06/20    GRL   Added -sinceBoot and -crashes
+
+    05/06/20    GRL   Shows process which ended but start event not in the time window
+                      If username in process exit different to starting username then displays this different user name
+                      Only get logon sessions if logn times or sessions requested as very slow when sessions are high
+
 #>
 
 <#
@@ -112,6 +119,14 @@ Enable process creation and termination auditing
 .PARAMETER disable
 
 Disable process creation and termination auditing
+
+.PARAMETER sinceBoot
+
+Show process launches starting from the boot time
+
+.PARAMETER crashes
+
+Cross reference process exits to crash events in the Application log
 
 .PARAMETER outputFile
 
@@ -226,6 +241,8 @@ Param
     [switch]$notSigned ,
     [switch]$logonTimes ,
     [switch]$bootTimes ,
+    [switch]$sinceBoot ,
+    [switch]$crashes ,
     [switch]$noStop ,
     [switch]$enable ,
     [switch]$disable ,
@@ -363,6 +380,111 @@ Function Load-GUI( $inputXml )
 }
 #>
 
+Function Get-FileInfo
+{
+    Param
+    (
+        [ref]$started
+    )
+
+    [bool]$excluded = $false 
+
+    if( ! ( $exeProperties = $fileProperties[ $started.Value.NewProcessName ] ) )
+    {
+        if( $remoteParam.Count )
+        {
+            if( $result = Invoke-Command @remoteParam -ScriptBlock { Get-ItemProperty -Path $($using:started).NewProcessName -ErrorAction SilentlyContinue } )
+            {
+                ## This is a deserialised object which doesn't seem to persist new properties added so we will make a local copy
+                $exeProperties = New-Object -TypeName 'PSCustomObject'
+                $result.PSObject.Properties | Where-Object MemberType -Match 'property$' | Foreach-ObjectFast `
+                {
+                    if( $_.Name -eq 'VersionInfo' ) ## has been flattened into a string so need to unflatten
+                    {
+                        [int]$added = 0
+                        $versionInfo = New-Object -TypeName 'PSCustomObject'
+                        $_.Value -split "`n" | Foreach-ObjectFast `
+                        {
+                            [string[]]$split = $_ -split ':',2 ## will be : in file names so only split on first
+                            if( $split -and $split.Count -eq 2 )
+                            {
+                                Add-Member -InputObject $versionInfo -MemberType NoteProperty -Name $split[0] -Value ($split[1]).Trim()
+                                $added++
+                            }
+                        }
+                        if( $added )
+                        {
+                            Add-Member -InputObject $exeProperties -MemberType NoteProperty -Name VersionInfo -Value $versionInfo 
+                        }
+                    }
+                    else
+                    {
+                        Add-Member -InputObject $exeProperties -MemberType NoteProperty -Name $_.Name -Value $_.Value
+                    }
+                }
+            }
+        }
+        elseif( $started.Value.NewProcessName )
+        {
+            $exeProperties = Get-ItemProperty -Path $started.Value.NewProcessName -ErrorAction SilentlyContinue
+        }
+        if( $exeProperties ) 
+        {  
+            try
+            {
+                if( $remoteParam.Count )
+                {
+                    $signature = Invoke-Command @remoteParam -ScriptBlock { Get-AuthenticodeSignature -FilePath $($using:exeProperties).FullName -ErrorAction SilentlyContinue }
+                }
+                else
+                {
+                    $signature = Get-AuthenticodeSignature -FilePath $exeProperties.FullName -ErrorAction SilentlyContinue
+                }
+            }
+            catch
+            {
+                $signature = $null
+            }
+            if( $remoteParam.Count )
+            {
+                $owner = Invoke-Command @remoteParam -ScriptBlock {  Get-Acl -Path $($using:started).NewProcessName -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Owner }
+            }
+            else
+            {
+                $owner = Get-Acl -Path $started.Value.NewProcessName -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Owner
+            }
+            $extraProperties = Add-Member -PassThru -InputObject $exeProperties -Force -NotePropertyMembers @{
+                'Vendor' = $(if( $signature -and $signature.SignerCertificate -and ( $signature.SignerCertificate.Subject -cmatch 'CN=(.*),\s*OU=' -or $signature.SignerCertificate.Subject -cmatch 'CN=(.*),\s*O=' ) ) { $Matches[1].Trim( '"' ) })
+                'Signed' = $(if( $signature -and $signature.Status.ToString() -eq 'Valid' ) { 'Yes' } else { 'No' })
+                'Occurrences' = ([int]1)
+                'Owner' = $owner
+            }
+            $fileProperties.Add( $started.Value.NewProcessName , $extraProperties )
+        }
+    }
+    else
+    {
+        $exeProperties.Occurrences += 1
+    }
+
+    if( $exeProperties )
+    {
+        $started.Value += @{
+            'Exe Signed' = $exeProperties.Signed
+            'Exe Created' = $exeProperties.CreationTime
+            'Exe Modified' = $exeProperties.LastWriteTime 
+            'Exe Company' = $exeProperties.VersionInfo|Select-Object -ExpandProperty CompanyName -ErrorAction SilentlyContinue
+            'Exe Vendor' = $exeProperties.Vendor
+            'Exe File Owner' = $exeProperties.Owner }
+
+        if( $notSigned -and $exeProperties.PSObject.Properties[ 'Signed' ] -and $exeProperties.Signed -eq 'Yes' )
+        {
+            $excluded = $true
+        }
+    }
+    $excluded
+}
+
 Function Get-AuditSetting
 {
     [CmdletBinding()]
@@ -481,9 +603,14 @@ if( $enable -or $disable )
     Exit $errors
 }
 
-if( $PSBoundParameters[ 'last' ] -and ( $PSBoundParameters[ 'start' ] -or $PSBoundParameters[ 'end' ] ) )
+if( $PSBoundParameters[ 'last' ] -and ( $PSBoundParameters[ 'start' ] -or $PSBoundParameters[ 'end' ] -or $PSBoundParameters[ 'sinceBoot' ] ) )
 {
-    Throw "Cannot use -last when -start or -end are also specified"
+    Throw "Cannot use -last when -start, -sinceboot or -end are also specified"
+}
+
+if( $PSBoundParameters[ 'nostop' ] -and $PSBoundParameters[ 'crashes' ] )
+{
+    Throw "Cannot use -nostop and -crashes"
 }
 
 [hashtable]$startEventFilter = @{
@@ -675,6 +802,17 @@ if( $PSBoundParameters[ 'start' ] )
 {
     $startEventFilter.Add( 'StartTime' , (Get-Date -Date $start ))
 }
+elseif( $PSBoundParameters[ 'sinceBoot' ] )
+{
+    if( $lastboot = Get-CimInstance -ClassName Win32_operatingsystem | Select-Object -ExpandProperty LastBootupTime )
+    {
+        $startEventFilter.Add( 'StartTime' , $lastboot )
+    }
+    else
+    {
+        Throw "Unable to get last boot time"
+    }
+}
 
 if( $PSBoundParameters[ 'duration' ] )
 {
@@ -784,6 +922,24 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
         $systemAccounts.Add( $_.SID , $_.Name )
     }
 
+    ## if cross referencing to crashes, get that data
+    [array]$processCrashes = $null
+    if( $PSBoundParameters[ 'crashes' ] )
+    {
+        [hashtable]$crashParameters = @{ 'Providername' = 'Windows Error Reporting' ; Id = 1001 }
+        if( $startEventFilter[ 'StartTime' ] )
+        {
+            $crashParameters.Add( 'StartTime' , $startEventFilter.StartTime )
+        }
+        if( $startEventFilter[ 'EndTime' ] )
+        {
+            $crashParameters.Add( 'EndTime' , $startEventFilter.EndTime )
+        }
+        $processCrashes = @( Get-WinEvent -FilterHashtable $crashParameters -ErrorAction SilentlyContinue | Where-Object { ! $_.processNames -or ! $_.processNames.Count -or [system.io.path]::GetFileNameWithoutExtension( $_.Properties[5].Value ) -in $processNames } )
+
+        Write-Verbose "Got $($processCrashes.Count) process crashes on $computer"
+    }
+
     ## If using event log file and -last then we need to get the date of the newest event as -last will be relative to that
     if( $PSBoundParameters[ 'last' ] -and $PSBoundParameters[ 'eventLog' ] )
     {
@@ -797,6 +953,7 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
     }
 
     ## Get Oldest event before we filter on date so can report oldest
+    Write-Verbose -Message "$(Get-Date -Format G): getting oldest start event"
     $earliestEvent = $null
     $earliestEventHere = Get-WinEvent @remoteParam -FilterHashtable $startEventFilter -Oldest -ErrorAction SilentlyContinue -MaxEvents 1
     if( ! $earliestEvent -or $earliestEventHere -lt $earliestEvent )
@@ -804,29 +961,35 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
         $earliestEvent = $earliestEventHere
     }
     
+    Write-Verbose -Message "$(Get-Date -Format G): earliest event is $(Get-Date -Date $earliestEvent.TimeCreated -Format G)"
+
     [hashtable]$logons = @{}
-    ## get logons so we can cross reference to the id of the logon
-    Get-WmiObject @remoteParam win32_logonsession -Filter "LogonType='10' or LogonType='12' or LogonType='2' or LogonType='11'" | ForEach-Object `
+    if( $logonTimes -or $listSessions )
     {
-        $session = $_
-        [array]$users = @( Get-WmiObject @remoteParam win32_loggedonuser -filter "Dependent = '\\\\.\\root\\cimv2:Win32_LogonSession.LogonId=`"$($session.LogonId)`"'" | ForEach-Object `
+        [array]$loggedOnUsers = @( Get-CimInstance @remoteParam -Classname win32_loggedonuser )
+        ## get logons so we can cross reference to the id of the logon
+        Get-CimInstance @remoteParam -Classname win32_logonsession -Filter "LogonType='10' or LogonType='12' or LogonType='2' or LogonType='11'" | ForEach-Object `
         {
-            if( $_.Antecedent -match 'Domain="(.*)",Name="(.*)"$' ` )
+            $session = $_
+            [array]$users = @( $loggedOnUsers.Where( { $_.Dependent -match "`"$($session.LogonId)`"" } ) | . { Process `
             {
-                [pscustomobject]@{ 'LogonTime' = (([WMI] '').ConvertToDateTime( $session.StartTime )) ; 'Domain' = $Matches[1] ; 'UserName' = $Matches[2] ; 'Computer' = $computer }
-            }
-            else
+                if( $_.Antecedent -match 'Name = "(.*)", Domain = "(.*)"' )
+                {
+                    [pscustomobject]@{ 'LogonTime' = $session.StartTime ; 'Domain' = $Matches[2] ; 'UserName' = $Matches[1] ; 'Computer' = $computer }
+                }
+                else
+                {
+                    Write-Warning "Unexpected antecedent format `"$($_.Antecedent)`""
+                }
+            }})
+            if( $users -and $users.Count )
             {
-                Write-Warning "Unexpected antecedent format `"$($_.Antecedent)`""
+                $logons.Add( $session.LogonId , $users )
             }
-        })
-        if( $users -and $users.Count )
-        {
-            $logons.Add( $session.LogonId , $users )
         }
     }
 
-    if( $listSessions -and $logons.Count )
+    if( $listSessions )
     {
         $allSessions += $logons
     }
@@ -837,10 +1000,12 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
         [int]$multiplePids = 0
 
         [hashtable]$endEvents = @{}
-        if( ! $noStop )
+        if( ! $noStop -and ! $summary )
         {
             [hashtable]$stopEventFilter = $startEventFilter.Clone()
             $stopEventFilter[ 'Id' ] = 4689
+
+            Write-Verbose -Message "$(Get-Date -Format G): getting termination events"
 
             Get-WinEvent @remoteParam -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue | . { Process `
             {
@@ -940,6 +1105,8 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
                 }
             }
         }
+        
+        Write-Verbose -Message "$(Get-Date -Format G): processing start events"
 
         ## Find all process starts then we'll look for the corresponding stops
         Get-WinEvent @remoteParam -FilterHashtable $startEventFilter -Oldest -ErrorAction SilentlyContinue -ErrorVariable 'eventError' | . { Process `
@@ -1028,7 +1195,7 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
                     }
 
                     ## now find corresponding termination event
-                    if( ! $noStop )
+                    if( ! $noStop -and ! $summary )
                     {
                         $terminate = $endEvents[ [int]$started.NewProcessId ]
                     }
@@ -1045,7 +1212,7 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
                         {
                             try
                             {
-                                if( $terminate[$index].TimeCreated -ge $event.TimeCreated )
+                                if( $terminate[$index].TimeCreated -ge $event.TimeCreated -and $terminate[$index].Properties[6].value -eq $event.Properties[5].value )
                                 {
                                     $thisTerminate = $terminate[$index]
                                 }
@@ -1066,121 +1233,52 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
                             $terminate = $null
                         }
                     }
-                    elseif( $terminate -and $terminate.TimeCreated -lt $event.TimeCreated ) ## This is not the event you are looking for (because it is prior to the launch)
+                    elseif( $terminate -and ( $terminate.TimeCreated -lt $event.TimeCreated -or $terminate.Properties[6].value -ne $event.Properties[5].value) )## This is not the event you are looking for (because it is prior to the launch)
                     {
                         $terminate = $null
                     }
             
+                    [string]$crashed = $null
+
                     if( $terminate )
                     {
+                        if( $processCrashes -and $processCrashes.Count )
+                        {
+                            # look for crash event within 30 seconds of process exit  m
+                            [string]$crashExe = Split-Path -Path $terminate.Properties[6].value -Leaf
+                            if( ( $crashEvent = $processCrashes.Where( { $_.TimeCreated -ge $terminate.TimeCreated -and $crashExe -eq $_.Properties[5].Value -and $_.TimeCreated -le $terminate.TimeCreated.AddSeconds( 30 ) } , 1 ) ) -or $terminate.Properties[ $endStatus ].value -match '^0xC' )
+                            {
+                                $crashed = 'Yes'
+                            }
+                        }
                         $started += @{
                             'Exit Code' = $terminate.Properties[ $endStatus ].value
                             'End' = $terminate.TimeCreated
-                            'Duration' = (New-TimeSpan -Start $event.TimeCreated -End $terminate.TimeCreated | Select-Object -ExpandProperty TotalMilliSeconds) / 1000 }
+                            'Duration' = (New-TimeSpan -Start $event.TimeCreated -End $terminate.TimeCreated | Select-Object -ExpandProperty TotalMilliSeconds) / 1000 
+                            'Crashed' = $crashed }
+                        ## Tag the terminate event as being used so we can pull out those which aren't later
+                        $blah = Add-Member -InputObject $terminate -MemberType NoteProperty -Name StartSeen -Value $started -PassThru
+                        if( ! $blah )
+                        {
+                            $_
+                        }
+                        if( $started.SubjectUserSid -ne $terminate.Properties[0].Value -and $null -eq $started.PSObject.Properties[ 'User Name Now' ] )
+                        {
+                            $differentUsername = $true
+                            $started.Add( 'User Name Now' , ( "{0}\{1}" -f $terminate.Properties[2].Value , $terminate.Properties[1].Value ))
+                        }
+                    }
+
+                    if( ! $crashed -and $started.NewProcessName -match '\\werfault\.exe\W\-p\s*(\d+)' )
+                    {
+                        ## if werfault then find the pid to the -p argument
                     }
 
                     [bool]$excluded = $false
 
                     if( ! $noFileInfo )
                     {
-                        $exeProperties = $fileProperties[ $started.NewProcessName ]
-                        if( ! $exeProperties )
-                        {
-                            if( $remoteParam.Count )
-                            {
-                                $result = Invoke-Command @remoteParam -ScriptBlock { Get-ItemProperty -Path $($using:started).NewProcessName -ErrorAction SilentlyContinue }
-                                if( $result )
-                                {
-                                    ## This is a deserialised object which doesn't seem to persist new properties added so we will make a local copy
-                                    $exeProperties = New-Object -TypeName 'PSCustomObject'
-                                    $result.PSObject.Properties | Where-Object MemberType -Match 'property$' | Foreach-ObjectFast `
-                                    {
-                                        if( $_.Name -eq 'VersionInfo' ) ## has been flattened into a string so need to unflatten
-                                        {
-                                            [int]$added = 0
-                                            $versionInfo = New-Object -TypeName 'PSCustomObject'
-                                            $_.Value -split "`n" | Foreach-ObjectFast `
-                                            {
-                                                [string[]]$split = $_ -split ':',2 ## will be : in file names so only split on first
-                                                if( $split -and $split.Count -eq 2 )
-                                                {
-                                                    Add-Member -InputObject $versionInfo -MemberType NoteProperty -Name $split[0] -Value ($split[1]).Trim()
-                                                    $added++
-                                                }
-                                            }
-                                            if( $added )
-                                            {
-                                                Add-Member -InputObject $exeProperties -MemberType NoteProperty -Name VersionInfo -Value $versionInfo 
-                                            }
-                                        }
-                                        else
-                                        {
-                                            Add-Member -InputObject $exeProperties -MemberType NoteProperty -Name $_.Name -Value $_.Value
-                                        }
-                                    }
-                                }
-                            }
-                            elseif( $started.NewProcessName )
-                            {
-                                $exeProperties = Get-ItemProperty -Path $started.NewProcessName -ErrorAction SilentlyContinue
-                            }
-                            if( $exeProperties ) 
-                            {  
-                                try
-                                {
-                                    if( $remoteParam.Count )
-                                    {
-                                        $signature = Invoke-Command @remoteParam -ScriptBlock { Get-AuthenticodeSignature -FilePath $($using:exeProperties).FullName -ErrorAction SilentlyContinue }
-                                    }
-                                    else
-                                    {
-                                        $signature = Get-AuthenticodeSignature -FilePath $exeProperties.FullName -ErrorAction SilentlyContinue
-                                    }
-                                }
-                                catch
-                                {
-                                    $signature = $null
-                                }
-                                if( $remoteParam.Count )
-                                {
-                                    $owner = Invoke-Command @remoteParam -ScriptBlock {  Get-Acl -Path $($using:started).NewProcessName -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Owner }
-                                }
-                                else
-                                {
-                                    $owner = Get-Acl -Path $started.NewProcessName -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Owner
-                                }
-                                $extraProperties = Add-Member -PassThru -InputObject $exeProperties -Force -NotePropertyMembers @{
-                                    'Vendor' = $(if( $signature -and $signature.SignerCertificate -and ( $signature.SignerCertificate.Subject -cmatch 'CN=(.*),\s*OU=' -or $signature.SignerCertificate.Subject -cmatch 'CN=(.*),\s*O=' ) ) { $Matches[1].Trim( '"' ) })
-                                    'Signed' = $(if( $signature -and $signature.Status.ToString() -eq 'Valid' ) { 'Yes' } else { 'No' })
-                                    'Occurrences' = ([int]1)
-                                    'Owner' = $owner
-                                }
-                                $fileProperties.Add( $started.NewProcessName , $extraProperties )
-                            }
-                        }
-                        else
-                        {
-                            $exeProperties.Occurrences += 1
-                        }
-                        if( $exeProperties )
-                        {     
-                            $started += @{
-                                'Exe Signed' = $exeProperties.Signed
-                                'Exe Created' = $exeProperties.CreationTime
-                                'Exe Modified' = $exeProperties.LastWriteTime 
-                                'Exe Company' = $exeProperties.VersionInfo|Select-Object -ExpandProperty CompanyName -ErrorAction SilentlyContinue
-                                'Exe Vendor' = $exeProperties.Vendor
-                                'Exe File Owner' = $exeProperties.Owner }
-                                
-                            if( $notSigned -and $exeProperties.PSObject.Properties[ 'Signed' ] -and $exeProperties.Signed -eq 'Yes' )
-                            {
-                                $excluded = $true
-                            }
-                            else
-                            {
-                                Write-Verbose "$($started.NewProcessName) isn't signed"
-                            }
-                        }
+                        $excluded = Get-FileInfo -started ([ref]$started)
                     }
 
                     if( ! $excluded )
@@ -1197,9 +1295,10 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
                                     $started.Add( 'User Name Now' , $existing.UserName )
                                 }
                             }
-                            elseif( ! $noStop )
+                            elseif( ! $noStop -and ! $summary )
                             {
-                                Write-Warning "Cannot find process terminated event for pid $($started.NewProcessId) and not currently running"
+                                Write-Warning "Cannot find process terminated event for pid $($started.NewProcessId) ($($started.NewProcessName)) started at $(Get-Date -Date $started.start -Format G) and not currently running"
+                                ## TODO might it be because it crashed and werfault took over?
                             }
                         }
 
@@ -1250,6 +1349,101 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
             }
         }}
 
+        ## look at what termination events there were for which we don't have the start event
+        ForEach( $endEvent in $endEvents.GetEnumerator() )
+        {
+            [array]$notSeenStartEvents= @( if( $endEvent.Value.GetType().Name -eq 'ArrayList' )
+            {
+                $endEvent.Value | Where-Object { ! $_.PSObject.Properties[ 'StartSeen' ] }
+            }
+            else
+            {
+                if( $null -eq $endEvent.Value.PSObject.Properties[ 'StartSeen' ] )
+                {
+                    $endEvent
+                }
+            })
+
+            if( $notSeenStartEvents -and $notSeenStartEvents.Count )
+            {
+                ForEach( $notSeenStartEvent in $notSeenStartEvents )
+                {
+                    if( $null -ne $notSeenStartEvent.Value -and $notSeenStartEvent.Value.Count )
+                    {
+                        [bool]$include = $true
+                        if( $PSBoundParameters[ 'processNames' ] -and $processNames.Count )
+                        {
+                            $include = $false
+                            ForEach( $processName in $processNames )
+                            {
+                                if( $notSeenStartEvent.value.Properties[ 6 ].Value -match $processName )
+                                {
+                                    $include = $true
+                                    break
+                                }
+                            }
+                        }
+                        if( $pids -and $pids.Count )
+                        {
+                            $include = $pids -contains $notSeenStartEvent.value.Properties[ 5 ].Value 
+                        }
+                        if( $PSBoundParameters[ 'notProcessNames' ] -and $notProcessNames.Count )
+                        {
+                            if( ! $processNames -or ! $processNames.Count )
+                            {
+                                $include = $true
+                            }
+                            ForEach( $notProcessName in $notProcessNames )
+                            {
+                                if( $notSeenStartEvent.value.Properties[ 6 ].Value -match $notProcessName )
+                                {
+                                    $include = $false
+                                    break
+                                }
+                            }
+                        }
+                        if( $include )
+                        {
+                            if( $processCrashes -and $processCrashes.Count )
+                            {
+                                # look for crash event within 30 seconds of process exit
+                                [string]$crashExe = Split-Path -Path $notSeenStartEvent.Value.Properties[6].value -Leaf
+                                if( ( $crashEvent = $processCrashes.Where( { $_.TimeCreated -ge $notSeenStartEvent.Value.TimeCreated -and $crashExe -eq $_.Properties[5].Value -and $_.TimeCreated -le $notSeenStartEvent.Value.TimeCreated.AddSeconds( 30 ) } , 1 ) ) -or $terminate.Properties[ $endStatus ].value -match '^0xC' )
+                                {
+                                    $crashed = 'Yes'
+                                }
+                            }
+
+                            $differentUserName = $true ## since we don't actually know what it was started as
+                            $started = @{ 
+                                'Computer' = $computer
+                                'NewProcessName' = $notSeenStartEvent.Value.Properties[6].Value
+                                'NewProcessId' = $notSeenStartEvent.Name
+                                'SubjectLogonId' = $notSeenStartEvent.Value.Properties[3].Value
+                                'Exit Code' = $notSeenStartEvent.Value.Properties[4].Value
+                                'User Name Now' = ("{0}\{1}" -f $notSeenStartEvent.Value.Properties[2].Value , $notSeenStartEvent.Value.Properties[1].Value )
+                                'SubjectUserName' = $notSeenStartEvent.Value.Properties[1].Value
+                                'SubjectDomainName' = $notSeenStartEvent.Value.Properties[2].Value
+                                'SubjectUserSid' = $notSeenStartEvent.Value.Properties[0].Value
+                                'End' = $notSeenStartEvent.Value.TimeCreated
+                                'Duration' = $null
+                                'Crashed' = $crashed }
+
+                            [bool]$excluded = $false
+                            if( ! $noFileInfo )
+                            {
+                                $excluded = Get-FileInfo -started ([ref]$started )
+                            }
+                    
+                            if( ! $excluded )
+                            {
+                                [pscustomobject]$started
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if( $eventError )
         {
             $oldestEvent = Get-WinEvent @remoteParam -LogName $startEventFilter[ 'Logname' ] -Oldest -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -1299,7 +1493,7 @@ if( $listSessions )
 {
     if( $allSessions.Count )
     {
-        $allSessions.GetEnumerator() | Select-Object -ExpandProperty Value | Sort-Object -Property LogonTime -Descending |Select-Object -Property @{n='Logon Time';e={"$(Get-Date -Date $_.LogonTime -Format d) $((Get-Date -Date $_.LogonTime).ToString('HH:mm:ss.ffffff'))"}},@{n='Username';e={"$($_.Domain)\$($_.Username)"}},Computer|Format-Table -AutoSize
+        $allSessions.GetEnumerator() | Select-Object -ExpandProperty Value | Sort-Object -Property LogonTime -Descending |Select-Object -Property LogonTime,@{n='Precise Logon Time';e={"$(Get-Date -Date $_.LogonTime -Format d) $((Get-Date -Date $_.LogonTime).ToString('HH:mm:ss.ffffff'))"}},@{n='Username';e={"$($_.Domain)\$($_.Username)"}},Computer
     }
     else
     {
@@ -1352,7 +1546,7 @@ elseif( $summary )
 }
 else
 {
-    $headings = [System.Collections.ArrayList]@()
+    $headings = [System.Collections.Generic.List[psobject]]@()
     if( $computers.Count -gt 1 )
     {
         [void]$headings.Add( 'Computer' )
@@ -1360,7 +1554,7 @@ else
     [void]$headings.Add( @{n='User Name';e={'{0}\{1}' -f $_.SubjectDomainName , $_.SubjectUserName}} )
     if( $differentUserName )
     {
-        [void]($headings.Add( 'User Name Now' ))
+        $headings.Add( 'User Name Now' )
     }
     $headings += @( @{n='Process';e={$_.NewProcessName}} , @{n='PID';e={$_.NewProcessId}} , `
         'CommandLine' , @{n='Parent Process';e={$_.ParentProcessName}} , 'SubjectLogonId' , @{n='Parent PID';e={$_.ProcessId}} , @{n='Elevated';e={$(if( $_.TokenElevationType -eq '%%1937' ) { 'Yes' } else { 'No' } )}} ,`
@@ -1368,6 +1562,10 @@ else
     if( ! $nostop )
     {
         $headings += @( @{n='End';e={('{0}.{1}' -f (Get-Date -Date $_.end -Format G) , $_.end.Millisecond)}} , 'Duration' ,  @{n='Exit Code';e={if( $_.'Exit Code' -ne $null ) { '0x{0:x}' -f $_.'Exit Code'}}} )
+        if( $crashes )
+        {
+            $headings += @( 'Crashed' )
+        }
     }
     if( ! $noFileInfo )
     {
