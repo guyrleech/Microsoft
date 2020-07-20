@@ -13,6 +13,7 @@
     27/02/20   GRL   Added -message and -ignore parameters
     03/06/20   GRL   Added -boot option
     05/06/20   GRL   Added user name,sid, pid and tid
+    20/07/20   GRL   Added -provider argument
 #>
 
 
@@ -77,6 +78,10 @@ Overwrite the csv file if it exists already
 
 Selected items in the grid view when OK is clicked will be placed on the pipeline so can be put on clipboard for example
 
+.PARAMETER provider
+
+The name, or pattern, for an event log source/provider to only return events from that
+
 .PARAMETER eventLogs
 
 A pattern matching the event logs to search. By default all event logs are searched.
@@ -136,6 +141,7 @@ Param
     [int[]]$ids ,
     [int[]]$excludeIds ,
     [string]$excludeProvider ,
+    [string]$provider ,
     [string]$message ,
     [string]$ignore ,
     [string]$csv ,
@@ -301,6 +307,11 @@ if( $badOnly )
     $eventFilter.Add( 'Level' , @( 1 , 2 , 3 ) )
 }
 
+if( $PSBoundParameters[ 'provider' ] )
+{
+    $eventFilter.Add( 'ProviderName' , $provider )
+}
+
 if( $PSBoundParameters[ 'ids' ] )
 {
     $eventFilter.Add( 'ID' , $ids )
@@ -314,14 +325,34 @@ $results = New-Object -TypeName System.Collections.Generic.List[psobject]
     $counter++
     Write-Verbose -Message "$counter / $($computer.Count) : $thiscomputer"
 
+    [bool]$continue = $true
     [hashtable]$computerArgument = @{}
     if( $thisComputer -ne 'localhost' -and $thisComputer -ne $env:COMPUTERNAME -and $thisComputer -ne '.' )
     {
         $computerArgument.Add( 'ComputerName' , $thisComputer ) ## not the most efficient way of doing this but it's better than having to do it manually!
     }
 
-    Get-WinEvent -ListLog $eventLogs @ComputerArgument -Verbose:$false | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -Verbose:$False -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
-        Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) -and ( ! $message -or $_.message -match $message ) -and ( ! $ignore -or $_.message -notmatch $ignore ) }}}}
+    [string[]]$eventLogsToSearch = $eventLogs
+
+    if( $eventFilter[ 'ProviderName' ] )
+    {
+        if( $providerDetails = Get-WinEvent -ListProvider $provider -ErrorAction SilentlyContinue @computerArgument )
+        {
+            $eventLogsToSearch = $providerDetails.LogLinks | Select-Object -ExpandProperty LogName
+            Write-Verbose -Message "Checking providers $($eventFilter.ProviderName) in $($eventLogsToSearch.Count) event logs $($eventLogsToSearch -join ' , ') on $thisComputer"
+        }
+        else
+        {
+            Write-Warning -Message "No event provider `"$provider`" on $thisComputer"
+            $continue = $false
+        }
+    }
+
+    if( $continue )
+    {
+        Get-WinEvent -ListLog $eventLogsToSearch @ComputerArgument -Verbose:$false | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -Verbose:$False -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
+            Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) -and ( ! $message -or $_.message -match $message ) -and ( ! $ignore -or $_.message -notmatch $ignore ) }}}}
+    }
 ) | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,RecordId,ProviderId,*ActivityId,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},*,@{n='User';e={if( $_.UserId ) { ([System.Security.Principal.SecurityIdentifier]($_.UserId)).Translate([System.Security.Principal.NTAccount]).Value }}} | . $command @arguments )
 
 if( $command -ne 'Export-CSV' )
