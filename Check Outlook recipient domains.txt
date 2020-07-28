@@ -4,7 +4,7 @@
 ''
 '' Paste the contents of this file into the ThisOutlookSession object in Outlook (Alt F11) & save it
 ''
-'' Guy Leech, 2018
+'' @guyrleech, 2020
 
 Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
 
@@ -33,6 +33,11 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
     Dim existing As String
     Dim domains As Collection
     Set domains = New Collection
+    Dim visibleRecipients As Integer
+    Dim invisibleRecipients As Integer
+    
+    visibleRecipients = 0
+    invisibleRecipients = 0
     
     '' to hide error if item not added to collection that we try to index via domain key
     On Error Resume Next
@@ -42,6 +47,13 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
           parts = Split(Recipient.Address, "@")
           If UBound(parts) = 1 And parts(1) <> ownDomainName Then
             existing = ""
+            
+            If Recipient.Type = olBCC Then
+              invisibleRecipients = invisibleRecipients + 1
+            Else
+              visibleRecipients = visibleRecipients + 1
+            End If
+          
             If domains.Count > 0 Then
                 '' if not present then error handling will ignore the error
                 existing = domains(parts(1))
@@ -52,13 +64,13 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
           End If
     Next
     
-    If domains.Count > 1 Then
+    If domains.Count > 1 And visibleRecipients > 0 Then '' to not warn when all in BCC, add "And visibleRecipients > 0"
         Dim externalDomains, message, answer As String
         For Each domain In domains
             externalDomains = externalDomains + " " + domain
         Next
         
-        message = "This email is being sent to " + CStr(domains.Count) + " different external domains:" + vbCrLf + vbCrLf + externalDomains + vbCrLf + vbCrLf + "Continue?"
+        message = "This email is being sent to " + CStr(domains.Count) + " different external domains:" + vbCrLf + vbCrLf + externalDomains + vbCrLf + vbCrLf + CStr(visibleRecipients) + " will be visible, " + CStr(invisibleRecipients) + " will not be visible" + vbCrLf + vbCrLf + "Continue?"
         answer = MsgBox(message, vbExclamation + vbYesNo, "Multiple Recipient Domains Detected")
         If answer <> vbYes Then
             Cancel = True
@@ -68,3 +80,4 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
     Set olNS = Nothing
     Set olApp = Nothing
 End Sub
+
