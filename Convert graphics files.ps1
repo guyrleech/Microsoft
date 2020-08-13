@@ -19,6 +19,10 @@ The graphics format to convert the files to
 
 The graphics format to convert the files from - will only act on files of this type found in the folder specified via -path
 
+.PARAMETER destPath
+
+Save destination file to this folder rather than the same folder as the source file
+
 .PARAMETER recurse
 
 Recurse the folder hierarchy specified via -path otherwise just operate on files in the specified folder
@@ -39,6 +43,7 @@ Param
     [string]$path ,
     [validateset( “bitmap”,”emf”,”exif”,”gif”,”icon”,”jpeg”,”png”,”tiff”,”wmf” )]
     [string]$destFormat = 'jpeg' ,
+    [string]$destPath ,
     [validateset( “bitmap”,”emf”,”exif”,”gif”,”icon”,”jpeg”,”png”,”tiff”,”wmf” )]
     [string]$sourceFormat = 'bitmap' ,
     [switch]$recurse
@@ -80,7 +85,22 @@ Get-ChildItem -Path $path -Recurse:$recurse -Force -Filter "*$oldExtension" | Fo
 {
     Write-Verbose "Converting `"$($_.FullName)`""
 
-    [string]$newFile = Join-Path -Path $_.Directory.FullName -ChildPath ( $_.BaseName + $newExtension )
+    [string]$newFile = $(if( $PSBoundParameters[ 'destPath' ] )
+    {
+        if( ! ( Test-Path -Path $destPath -PathType Container -ErrorAction SilentlyContinue) )
+        {
+            if( ! ( $newFolder = New-Item -Path $destPath -Force -ItemType Directory ) )
+            {
+                Throw "Failed to create destination path `"$destPath`""
+            }
+        }
+        Join-Path -Path $destPath -ChildPath ( $_.BaseName + $newExtension )
+    }
+    else
+    {
+        Join-Path -Path $_.Directory.FullName -ChildPath ( $_.BaseName + $newExtension )
+    })
+
     if( Test-Path -Path $newFile -ErrorAction SilentlyContinue ) 
     {
         Write-Warning "`"$newFile`" already exists"
