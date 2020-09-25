@@ -15,6 +15,7 @@
     05/06/20   GRL   Added user name,sid, pid and tid
     20/07/20   GRL   Added -provider argument
     22/07/20   GRL   Fixed duplicate entries produced by duplicate events logs returned for providers
+    25/09/20   GRL   Added minutes past hour functionality for troubleshooting recurring problems
 #>
 
 <#
@@ -78,6 +79,14 @@ Overwrite the csv file if it exists already
 
 Selected items in the grid view when OK is clicked will be placed on the pipeline so can be put on clipboard for example
 
+.PARAMETER minutesPastHour
+
+Only include events after this number of minutes past the hour and for the number of minutes specified by -minutes.
+
+.PARAMETER minutes
+
+Only include events before this number of minutes past the hour when added to the minutes specified by -minutesPastHour.
+
 .PARAMETER provider
 
 The name, or pattern, for an event log source/provider to only return events from that
@@ -95,6 +104,12 @@ One or more remote computers to query. If not specified then the local computer 
 & '.\event aggregator.ps1' -start 10:38 -end 10:45 -badOnly
 
 Show all critical, warning and error events that occurred between 10:38 and 10:45 today in an on screen gridview
+
+.EXAMPLE
+
+& '.\event aggregator.ps1' -start 07:57 -minutesPastHour 57 -minutes 1.75
+
+Show all  events that occurred since 0757 today but only those that occurred between 57:00 minutes and 58:45 past the hour in an on screen gridview
 
 .EXAMPLE
 
@@ -138,6 +153,8 @@ Param
 	[string]$duration ,
     [Parameter(ParameterSetName='Last',Mandatory,HelpMessage='Search for events in last seconds/minutes/hours/days/weeks/years')]
     [string]$last ,
+    [double]$minutesPastHour ,
+    [double]$minutes ,
     [int[]]$ids ,
     [int[]]$excludeIds ,
     [string]$excludeProvider ,
@@ -336,6 +353,26 @@ if( $PSBoundParameters[ 'ids' ] )
 
 $results = New-Object -TypeName System.Collections.Generic.List[psobject]
 [int]$counter = 0
+[int]$secondsPastHour = -1
+[int]$secondsPastHourEnd = -1
+
+if( $PSBoundParameters[ 'minutesPastHour' ] )
+{
+    if( $minutesPastHour -lt 0 -or $minutesPastHour -ge 60 )
+    {
+        Throw "Minutes past hour value $minutesPastHour is invalid - must >= 0 and < 60"
+    }
+    if( ! $PSBoundParameters[ 'minutes' ] )
+    {
+        Throw 'Must specify the number of minutes to include via -minutes when using -minutesPastHour'
+    }
+    $secondsPastHour = $minutesPastHour * 60 ## allows fractional minutes
+    $secondsPastHourEnd = $secondsPastHour + $minutes * 60
+}
+elseif( $PSBoundParameters[ 'minutes' ] )
+{
+    Throw 'Must specify the number of minutes past the hour via -minutesPastHour to start at when using -minutes'
+}
 
 [array]$results = @( $(ForEach( $thisComputer in $Computer )
 {
@@ -367,10 +404,13 @@ $results = New-Object -TypeName System.Collections.Generic.List[psobject]
 
     if( $continue )
     {
-        Get-WinEvent -ListLog $eventLogsToSearch @ComputerArgument -Verbose:$false | Where-Object { $_.RecordCount } | . { Process { Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -Verbose:$False -FilterHashtable ( @{ logname = $_.logname } + $eventFilter ) | `
-            Where-Object { ( [string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) -and ( ! $message -or $_.message -match $message ) -and ( ! $ignore -or $_.message -notmatch $ignore ) }}}}
+        (Get-WinEvent -ListLog $eventLogsToSearch @ComputerArgument -Verbose:$false | Where-Object { $_.RecordCount } ).ForEach( { (Get-WinEvent @ComputerArgument -ErrorAction SilentlyContinue -Verbose:$False -FilterHashtable ( @{ logname = $_.logname } + $eventFilter )).Where(
+        {            
+            ([string]::IsNullOrEmpty( $excludeProvider) -or $_.ProviderName -notmatch $excludeProvider ) -and ( ! $excludeIds -or ! $excludeIds.Count -or $_.Id -notin $excludeIds ) -and ( ! $message -or $_.message -match $message ) -and ( ! $ignore -or $_.message -notmatch $ignore ) `
+                -and ( $secondsPastHour -lt 0 -or (( $seconds = ( $_.TimeCreated.Minute * 60 + $_.TimeCreated.Seconds ) ) -ge $secondsPastHour -and $seconds -le $secondsPastHourEnd ))
+        })})
     }
-) | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,RecordId,ProviderId,*ActivityId,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},*,@{n='User';e={if( $_.UserId ) { ([System.Security.Principal.SecurityIdentifier]($_.UserId)).Translate([System.Security.Principal.NTAccount]).Value }}} | . $command @arguments )
+}) | Sort-Object -Property TimeCreated | Select-Object -ExcludeProperty TimeCreated,RecordId,ProviderId,*ActivityId,Version,Qualifiers,Level,Task,OpCode,Keywords,Bookmark,*Ids,Properties -Property @{n='Date';e={"$(Get-Date -Date $_.TimeCreated -Format d) $((Get-Date -Date $_.TimeCreated).ToString('HH:mm:ss.fff'))"}},*,@{n='User';e={if( $_.UserId ) { ([System.Security.Principal.SecurityIdentifier]($_.UserId)).Translate([System.Security.Principal.NTAccount]).Value }}} | . $command @arguments )
 
 if( $command -ne 'Export-CSV' )
 {
@@ -380,8 +420,8 @@ if( $command -ne 'Export-CSV' )
 # SIG # Begin signature block
 # MIINRQYJKoZIhvcNAQcCoIINNjCCDTICAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUWamRa8PJ4p8M7ivKV+2uNT9s
-# /AKgggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUfQAw6FSSigKpwXtPjHNGUasT
+# hn2gggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -442,11 +482,11 @@ if( $command -ne 'Export-CSV' )
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAT946rb3bWrnkH02dUhdU4wCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFKaW1cZmzm4qUKZsE15N
-# T4ZANqBRMA0GCSqGSIb3DQEBAQUABIIBAKmlMnJSQ0aI8JDlIVuUeBY0pFGmCKoL
-# /0JjSpr/XxhTZm+6eZWNc+UiWCU5mbm1F9/D66pE8lP2vdQaE0B46CfpNZwdwfOj
-# MSb90ehDXtw41SzVfKG3x8cA3qWMMEqDgWVc/ZZLePW1J1TQCC5VaB97/xs9FbCc
-# Jlgo07/xzGAnZw5PPF1fMv7jCpXtGDD1nIKRqWG2ldXGOKjO7uzbOR6GfvTMKLA5
-# Jv/prEl2ePoLeEtvNXJCwVcskII4S8uB0CI4M68bWx/B5NcJXShjxG3i4qKf/IKW
-# CvHbyld27W0AcmPZoIdCrM9wFG11SAV7FR6LYeqsRDYz/qb/GxcjhVg=
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFKgYGclRWY4bIcQyArIP
+# 64eVjL9lMA0GCSqGSIb3DQEBAQUABIIBAHmly7sbGXjb1ZxiJVFbo8/XU7tVThJC
+# 04QiywCYcR2txfzXCHIBHDbmrxDjrveuf4yYjzXVQTcjFJ2BTdiiVhMGcg6iY1ru
+# t+V6fycXtJx01RcXZitA9VLqrdEByVLjOR348ut59NKLdlzyNTv1NDILzYfXYuX8
+# /YH9482ZA62ox9AthGi4hundZPqdE/LMNfWVYRS90KK/OrJd+IKIya3rCT8vnbwm
+# ydaM5GeEtZiA7PKb+5E16xNpeDYZ6hWHmIugPAxmwLpXbPK1KP5zXk6bNH4KTsGO
+# 2zpf7V9iiMFQQKg5JfytMtoISF8Sjd9ZArakbCtFDtYyzaAE8r0iwmw=
 # SIG # End signature block
