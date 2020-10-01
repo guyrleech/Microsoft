@@ -57,6 +57,7 @@ Modification History:
 
    @guyrleech 11/04/20  Initial release
    @guyrleech 01/10/20  Added Summary Information Stream retrieval
+   @guyrleech 01/10/20  Added description for security summary information field
 #>
 
  Function Get-MSIProperty
@@ -103,6 +104,12 @@ Modification History:
             18 = 'Creating Application'
             19 = 'Security'
         }
+        ## https://docs.microsoft.com/en-us/windows/win32/msi/security-summary
+        [hashtable]$securityProperties = @{
+            0	= 'No restriction'
+            2	= 'Read-only recommended'
+            4	= 'Read-only enforced'
+        }
     }
 
     Process
@@ -132,11 +139,19 @@ Modification History:
                         {
                             if( ( ( ! $properties -or ! $properties.Count -or ! $PSBoundParameters[ 'properties' ] ) -or $summaryInformationStreamProperty.Value -in $properties ) -and ( $null -ne ( $info = $summary.Property( $summaryInformationStreamProperty.Name ) ) ) )
                             {
+                                if( $summaryInformationStreamProperty.Value -eq 'Security' )
+                                {
+                                    ## convert number to meaningful string
+                                    if( $securityDescription = $securityProperties[ $info ] )
+                                    {
+                                        $info = $securityDescription
+                                    }
+                                }
                                 [pscustomobject][ordered]@{
                                         'File' = $file
                                         'Summary Property' = $summaryInformationStreamProperty.Value
                                         'PID' = $summaryInformationStreamProperty.Name
-                                        'Value' = $info
+                                        'Value' = $info 
                                     }
                             }
                             elseif( ! $quiet )
