@@ -20,6 +20,7 @@
     23/07/19   GRL   Added HKU searching
 
     14/10/20   GRL   Added default parameter set name and hiding error if can't open reg key
+                     Added InstallSource
 #>
 
 <#
@@ -272,6 +273,7 @@ Function Process-RegistryKey
                         'DisplayName' = $($thisSubKey.GetValue('DisplayName'))
                         'DisplayVersion' = $($thisSubKey.GetValue('DisplayVersion'))
                         'InstallLocation' = $($thisSubKey.GetValue('InstallLocation'))
+                        'InstallSource' = $($thisSubKey.GetValue('InstallSource'))
                         'Publisher' = $($thisSubKey.GetValue('Publisher'))
                         'InstallDate' = $installedOn
                         'Size (MB)' = $size
@@ -480,8 +482,8 @@ else
 # SIG # Begin signature block
 # MIINRQYJKoZIhvcNAQcCoIINNjCCDTICAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUyRezJlLTaY50LANgQdD+0taW
-# aeqgggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUqDaAhKNIdlJy5EzxmBXQXBBS
+# 706gggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -542,11 +544,11 @@ else
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAT946rb3bWrnkH02dUhdU4wCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFCJLvzUM36ZUtOED7mQB
-# MKQitWHXMA0GCSqGSIb3DQEBAQUABIIBAFjW/h0subePW3AYTzTDdB8Q23Ye0bV2
-# fwfb1vPc6jcMYNwjrN2cL+sgBKQuE2icLR7YTbyt1yNba3a3yRvpa8HkEk/RmA2o
-# OsUWs4ZBo1Dvjp+NbRPOmzmvwA7r4joCJ/UVVDp8huB5Ree2Tv5Npcy+enBo6lPN
-# 7hnP4KCEUXaCnaCC24TVpWGnyfO0McjkLrVTR1zw68tGVgcVEJE8dlpNtotCfKW+
-# 5pGhgmPeSxVPj0qjFUgSRurkzfEF5uWe1I2b62PvKUjlWkGduyfJAACypCG/HFCh
-# EfMMFijSMpZEOyokJewWKFyoltw17/ADBvsPiTfFbEpv5YQT2Uwdiz8=
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFJ4IwQ9I/8wEf3WXdyya
+# uGSyKVlYMA0GCSqGSIb3DQEBAQUABIIBAI6/n0gg9vTnI6Kvgu1qfM81P4VFBLia
+# SoM5IyD75sUvKCDTgRl675mjQwabk81Wd/69/uAXYUAPc2/EFiYQu7HU7FtE8qbb
+# Gew5KEtFl+PNf2lDV35GoDESTiJN5k6werEcAOxSAjskmvXOr/0jpMehLiNAWZA6
+# 1vafwAJxWMS1LeX5gMYWkudVr8iDrroJIhaMlmCq8yWcN3qRzR/P+W11m1CfUJKP
+# Wedeg0xC/YT9ai+Dt9xk3MlxkRjbzDkJKY+eegBDS49mTyJEYYqMujK+OVL3uXR4
+# at0L5hEDWSb1iVDGUkwiMnv3qk1wu8GP4AhsfZ/CJBl7kbWLbfF9gjE=
 # SIG # End signature block
