@@ -10,6 +10,7 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
 
     Dim olNS As Outlook.NameSpace
     Dim ownDomainName, parts() As String
+    Dim answer As String
     
     Set olApp = CreateObject("Outlook.Application")
     Set olNS = olApp.GetNamespace("MAPI")
@@ -21,7 +22,10 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
             If ownDomainName = "" Then
                 ownDomainName = parts(1)
             ElseIf ownDomainName <> parts(1) Then
-                MsgBox "Found multiple different domain names for sender", vbInformation + vbOKOnly, "Warning"
+                answer = MsgBox("Found multiple different domain names for sender - continue?", vbQuestion + vbYesNo, "Warning")
+                If answer <> vbYes Then
+                    Cancel = True
+                End If
             End If
         End If
     Next
@@ -39,7 +43,7 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
     visibleRecipients = 0
     invisibleRecipients = 0
     
-    '' to hide error if item not added to collection that we try to index via domain key
+    '' to hide error if item not added to collection that we try to index via domain key - lazy?
     On Error Resume Next
     
     '' add all domain names which aren't the same as the senders to a collection so we can easily count the unique ones
@@ -65,7 +69,7 @@ Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
     Next
     
     If domains.Count > 1 And visibleRecipients > 0 Then '' to not warn when all in BCC, add "And visibleRecipients > 0"
-        Dim externalDomains, message, answer As String
+        Dim externalDomains, message As String
         For Each domain In domains
             externalDomains = externalDomains + " " + domain
         Next
