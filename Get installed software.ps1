@@ -21,6 +21,10 @@
 
     14/10/20   GRL   Added default parameter set name and hiding error if can't open reg key
                      Added InstallSource
+
+    22/05/21   GRL   Added json and csv direct output. Added -delimiter for csv outputs for ze Dutch
+
+    24/05/21   GRL   Added parameters to filter on product name and/or vendor
 #>
 
 <#
@@ -40,6 +44,14 @@ Comma separated list of computer names to query. Use . to represent the local co
 
 The name and optional path to a non-existent csv file which will have the results written to it
 
+.PARAMETER productname
+
+Only show products where the display name matches this regular expression 
+
+.PARAMETER vendor
+
+Only show products where the publisher matches this regular expression 
+
 .PARAMETER gridview
 
 The output will be presented in an on screen filterable/sortable grid view. Lines selected when OK is clicked will be placed in the clipboard
@@ -55,6 +67,14 @@ Comma separated list of one or more package names, or regular expressions that m
 .PARAMETER silent
 
 Try and run the uninstall silently. This only works where the uninstall program is msiexec.exe
+
+.PARAMETER asjson
+
+Output objects as json
+
+.PARAMETER ascsv
+
+Output objects as csv
 
 .PARAMETER importcsv
 
@@ -73,6 +93,13 @@ Includes registry keys which have no "DisplayName" value which may not be valid 
 & '.\Get installed software.ps1' -gridview -computers .
 
 Retrieve installed software details on the local computer and show in a grid view
+
+.EXAMPLE
+
+& '.\Get installed software.ps1' -gridview -computers . -ascsv -quiet -productname 'Teams' -vendor 'Microsoft'
+
+Retrieve installed software details on the local computer where the display name contains "Teams" and the vendor contains "Microsoft".
+Output the results to the pipeline in csv format , whilst suppressing warnings.
 
 .EXAMPLE
 
@@ -113,6 +140,8 @@ Param
     [Parameter(Mandatory=$false, ParameterSetName = "ComputerList")]
     [string[]]$computers ,
     [string]$exportcsv ,
+    [string]$productname ,
+    [string]$vendor ,
     [switch]$gridview ,
     [Parameter(Mandatory=$false, ParameterSetName = "ComputerCSV")]
     [string]$importcsv ,
@@ -122,6 +151,9 @@ Param
     [string[]]$remove ,
     [switch]$silent ,
     [switch]$quiet ,
+    [switch]$asjson ,
+    [switch]$ascsv ,
+    [string]$delimiter = ',' ,
     [switch]$includeEmptyDisplayNames
 )
 
@@ -227,7 +259,11 @@ Function Process-RegistryKey
         [string[]]$UninstallKeys ,
         [switch]$includeEmptyDisplayNames ,
         [AllowNull()]
-        [string]$username
+        [string]$username ,
+        [AllowNull()]
+        [string]$productname ,
+        [AllowNull()]
+        [string]$vendor
     )
 
     ForEach( $UninstallKey in $UninstallKeys )
@@ -264,25 +300,28 @@ Function Process-RegistryKey
                         $size = [math]::Round( $size / 1KB , 1 ) ## already in KB
                     }
 
-                    [pscustomobject][ordered]@{
-                        'ComputerName' = $computername
-                        'Hive' = $Hive
-                        'User' = $username
-                        'Key' = $key
-                        'Architecture' = $architecture
-                        'DisplayName' = $($thisSubKey.GetValue('DisplayName'))
-                        'DisplayVersion' = $($thisSubKey.GetValue('DisplayVersion'))
-                        'InstallLocation' = $($thisSubKey.GetValue('InstallLocation'))
-                        'InstallSource' = $($thisSubKey.GetValue('InstallSource'))
-                        'Publisher' = $($thisSubKey.GetValue('Publisher'))
-                        'InstallDate' = $installedOn
-                        'Size (MB)' = $size
-                        'System Component' = $($thisSubKey.GetValue('SystemComponent') -eq 1)
-                        'Comments' = $($thisSubKey.GetValue('Comments'))
-                        'Contact' = $($thisSubKey.GetValue('Contact'))
-                        'HelpLink' = $($thisSubKey.GetValue('HelpLink'))
-                        'HelpTelephone' = $($thisSubKey.GetValue('HelpTelephone'))
-                        'Uninstall' = $($thisSubKey.GetValue('UninstallString'))
+                    if( $thisSubKey.GetValue('DisplayName') -match $productname -and $thisSubKey.GetValue('Publisher') -match $vendor )
+                    {
+                        [pscustomobject][ordered]@{
+                            'ComputerName' = $computername
+                            'Hive' = $Hive
+                            'User' = $username
+                            'Key' = $key
+                            'Architecture' = $architecture
+                            'DisplayName' = $($thisSubKey.GetValue('DisplayName'))
+                            'DisplayVersion' = $($thisSubKey.GetValue('DisplayVersion'))
+                            'InstallLocation' = $($thisSubKey.GetValue('InstallLocation'))
+                            'InstallSource' = $($thisSubKey.GetValue('InstallSource'))
+                            'Publisher' = $($thisSubKey.GetValue('Publisher'))
+                            'InstallDate' = $installedOn
+                            'Size (MB)' = $size
+                            'System Component' = $($thisSubKey.GetValue('SystemComponent') -eq 1)
+                            'Comments' = $($thisSubKey.GetValue('Comments'))
+                            'Contact' = $($thisSubKey.GetValue('Contact'))
+                            'HelpLink' = $($thisSubKey.GetValue('HelpLink'))
+                            'HelpTelephone' = $($thisSubKey.GetValue('HelpTelephone'))
+                            'Uninstall' = $($thisSubKey.GetValue('UninstallString'))
+                        }
                     }
                 }
                 else
@@ -373,7 +412,7 @@ if( ! $computers -or $computers.Count -eq 0 )
     
     if( $? -and $reg )
     {
-        Process-RegistryKey -Hive 'HKLM' -reg $reg -UninstallKeys $UninstallKeys -includeEmptyDisplayNames:$includeEmptyDisplayNames
+        Process-RegistryKey -Hive 'HKLM' -reg $reg -UninstallKeys $UninstallKeys -includeEmptyDisplayNames:$includeEmptyDisplayNames -productname $productname -vendor $vendor
         $reg.Close()
     }
     else
@@ -401,7 +440,7 @@ if( ! $computers -or $computers.Count -eq 0 )
                     {
                         $username = $null
                     }
-                    Process-RegistryKey -Hive (Join-Path -Path 'HKU' -ChildPath $subkey) -reg $userReg -UninstallKeys $UninstallKeys -includeEmptyDisplayNames:$includeEmptyDisplayNames -user $username
+                    Process-RegistryKey -Hive (Join-Path -Path 'HKU' -ChildPath $subkey) -reg $userReg -UninstallKeys $UninstallKeys -includeEmptyDisplayNames:$includeEmptyDisplayNames -user $username  -productname $productname -vendor $vendor
                     $userReg.Close()
                 }
             }
@@ -425,7 +464,7 @@ if( $installed -and $installed.Count )
 
     if( ! [string]::IsNullOrEmpty( $exportcsv ) )
     {
-        $installed | Export-Csv -NoClobber -NoTypeInformation -Path $exportcsv
+        $installed | Export-Csv -NoClobber -NoTypeInformation -Path $exportcsv -Delimiter $delimiter
     }
     if( $gridView )
     {
@@ -469,6 +508,14 @@ if( $installed -and $installed.Count )
             Write-Warning "No unistallers were run as no packages specified in -remove matched"
         }
     }
+    elseif( $asjson )
+    {
+        $installed | ConvertTo-Json -Compress
+    }
+    elseif( $ascsv )
+    {
+        $installed | ConvertTo-Csv -NoTypeInformation -Delimiter $delimiter
+    }
     else
     {
         $installed
@@ -482,8 +529,8 @@ else
 # SIG # Begin signature block
 # MIINRQYJKoZIhvcNAQcCoIINNjCCDTICAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUqDaAhKNIdlJy5EzxmBXQXBBS
-# 706gggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU6/UTEGzV9W1G/duQ5TgwJ0m9
+# 0hagggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -544,11 +591,11 @@ else
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAT946rb3bWrnkH02dUhdU4wCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFJ4IwQ9I/8wEf3WXdyya
-# uGSyKVlYMA0GCSqGSIb3DQEBAQUABIIBAI6/n0gg9vTnI6Kvgu1qfM81P4VFBLia
-# SoM5IyD75sUvKCDTgRl675mjQwabk81Wd/69/uAXYUAPc2/EFiYQu7HU7FtE8qbb
-# Gew5KEtFl+PNf2lDV35GoDESTiJN5k6werEcAOxSAjskmvXOr/0jpMehLiNAWZA6
-# 1vafwAJxWMS1LeX5gMYWkudVr8iDrroJIhaMlmCq8yWcN3qRzR/P+W11m1CfUJKP
-# Wedeg0xC/YT9ai+Dt9xk3MlxkRjbzDkJKY+eegBDS49mTyJEYYqMujK+OVL3uXR4
-# at0L5hEDWSb1iVDGUkwiMnv3qk1wu8GP4AhsfZ/CJBl7kbWLbfF9gjE=
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFNejwW2TQucRX3X4POVB
+# DYKioPn+MA0GCSqGSIb3DQEBAQUABIIBAIseO/NrGONMZfnHIMqYvrs50A2VRGDC
+# y+L2Rz/gmJX/GMxkiQLHveL+pVw1CuM+b6sQZgPWPUopoDri+jMI5yVAIJmfsPgV
+# F0b8z9nhjZhmOrRQMosh8hQOJKL1IwBV6zgRc8oo57TnsvMTPmSoOiNqbMd3LlKm
+# 4nrNzHiP5JoPkd3wvypTxcA3iIaMrANwDhqJwoRg1VhSFWB0XyCJufgE1iArTjzc
+# DwaZIkqWdAbYwiGQioVtOlM4171MaQyqTHXcv/VDZcnFn8Y9XoPnT9V/E6k563Sx
+# uxV2mani2yykiw/mIlqTOW+poiSLewesmb7IMSZ8RYfpetZLSwHzSdA=
 # SIG # End signature block
