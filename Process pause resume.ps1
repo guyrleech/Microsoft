@@ -30,6 +30,10 @@
 .PARAMETER quiet
 
     No extraneous output
+    
+.PARAMETER windowControl
+
+    Minimise the window associated with the process if pausing and restore the window if resuming
 
 .PARAMETER trim
 
@@ -40,6 +44,7 @@
     Write to the specified log file
 
 .PARAMETER append
+
     Append to ann existing log file. Without this it will be overwritten
 
 .EXAMPLE
@@ -62,6 +67,7 @@
 
     @guyrleech 2021/02/02  Initial version
     @guyrleech 2021/05/27  Initial public release
+    @guyrleech 2021/05/27  Added ability to minimise/restore window
 #>
 
 [CmdletBinding()]
@@ -77,8 +83,10 @@ Param
     [switch]$resume ,
     [switch]$allSessions ,
     [switch]$quiet ,
+    [switch]$windowControl ,
     [switch]$trim ,
     [string]$logfile ,
+    [int]$maximumMinimisedRetries = 10 ,
     [switch]$append
 )
 
@@ -139,6 +147,28 @@ Begin
                 THREAD_QUERY_LIMITED_INFORMATION = 0x800,
             };
         }
+        public static class user32
+        {
+            [DllImport("user32.dll", SetLastError=true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+            [DllImport("user32.dll", SetLastError=true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow); 
+            
+            [DllImport("user32.dll", SetLastError=true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); 
+            
+            [DllImport("user32.dll", SetLastError=true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool IsIconic(IntPtr hWnd); 
+
+            [DllImport("user32.dll", SetLastError=true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool SetWindowPos( IntPtr hWnd, IntPtr hWndInsertAfter, int  X, int  Y, int  cx, int  cy,  uint uFlags);
+        }
 '@ -ErrorAction Stop
 
     Function Invoke-PauseResumeProcess
@@ -149,7 +179,8 @@ Begin
         (
             [int[]]$id ,
             [bool]$resume ,
-            [bool]$trim
+            [bool]$trim ,
+            [bool]$windowControl 
         )
         
         [int]$operatedOn = 0
@@ -163,6 +194,28 @@ Begin
             }
             elseif( $thisProcess = Get-Process -Id $processId -ErrorAction SilentlyContinue )
             {
+                ## if pausing then must change window state before hand
+                
+                if( $windowControl -and ! $resume -and $thisProcess.MainWindowHandle -ne [IntPtr]::Zero )
+                {
+                    ## sync call so minimised before we pause threads
+                    if( ! [user32]::ShowWindow( $thisProcess.MainWindowHandle , 11 ) ) ## SW_FORCEMINIMIZE
+                    {
+                        if( ! $quiet )
+                        {
+                            Write-Warning -Message "Failed to minimise window for pid $($thisProcess.Id)"
+                        }
+                    }
+                    else
+                    {
+                        [int]$retries = 0 
+                        While( ! [user32]::IsIconic( $thisProcess.MainWindowHandle ) -and $retries++ -le $maximumMinimisedRetries )
+                        {
+                            Start-Sleep -Milliseconds 250
+                        }
+                    }
+                }
+
                 [int]$is32bitProcess = -1
                 [int]$threadsOperatedOn = 0
 
@@ -237,6 +290,14 @@ Begin
                     else
                     {
                         Write-Warning -Message "Failed to open thread id $($thread.Id) in process $processId - $lasterror"
+                    }
+                }
+                
+                if( $windowControl -and $resume -and $thisProcess.MainWindowHandle -ne [IntPtr]::Zero )
+                {
+                    if( ! [user32]::ShowWindowAsync( $thisProcess.MainWindowHandle , 9 ) -and ! $quiet ) ## SW_RESTORE
+                    {
+                        Write-Warning -Message "Failed to restore window for pid $($thisProcess.Id)"
                     }
                 }
 
@@ -327,7 +388,7 @@ Process
     if( $id -and $id.Count )
     {
         $processCount += $id.Count
-        $operatedOn += Invoke-PauseResumeProcess -id $id -resume $resume -trim $trim
+        $operatedOn += Invoke-PauseResumeProcess -id $id -resume $resume -trim $trim -windowControl $windowControl
     }
 }
 
@@ -343,8 +404,8 @@ End
 # SIG # Begin signature block
 # MIINRQYJKoZIhvcNAQcCoIINNjCCDTICAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUIJg/gA4HmlaRJPzaXXnnsho0
-# Is2gggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUE+MUsLfOFe1jlwAUW0kWyapv
+# fLagggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -405,11 +466,11 @@ End
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAT946rb3bWrnkH02dUhdU4wCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFGWdS6eVT5nVBTZomqLj
-# 7yzl3VpQMA0GCSqGSIb3DQEBAQUABIIBABCALirb57jdfCN4zJLyRgMNGMpO7uEr
-# cd7wBWuB2OdD/ze+zj4XkFMbGPGMol1Vkf7vnZNw8rALv3aKoxTPvHim54hdTx38
-# oYfdQ6zHzZvt6hLRljeanqux/MmDRmZEIdq9KEB9reEwVAhEy4MS9uVluYkcJo0o
-# 4jTZaU1hOULWGSTBwRRxtkndpb3yE5TUYksXw1ZC4q/Mex7S9nYPZU/JJyjWFEXz
-# OzvvcSZglq6YByvSzsFchdKasvqhUG8vfFR44kB+GcNde9QSKkpxlBk3sEQlg5K7
-# oXtPgCQqpxnyG/yz+T4CfUIZ4EC4TypQtR8GInkYoRlsi7COse4dYBw=
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFIiBJO5wtD8BQa4fQvnf
+# CjkpOXbAMA0GCSqGSIb3DQEBAQUABIIBAFtj5EeBqemvERw8gvNAWYGGRjGNJhq2
+# Q3hUYwyYkOsv5tNxoKv6AgL7QI9Nx9tg2+DEBzIPBwmA0IO9PUECvHIAzu0JNTjP
+# U90Zg8OxQY+vymycGux2btK4qXpr+CeAhw/wwI75Dti5Zv8FrWaQeEf7aoaCdUoH
+# 22uBu3P4PoMBp7qweOu3e5RZACX8o7oRKkbcooD7HyYPZpcJXQrDUykbYL6GzrWR
+# LIlZ2hq0o37KBM4LS2bBM/EUZNm9E+m8+Z1imnLijAumXszRBhwgs6jpwl1bWiS+
+# GU24gmZAVqu6X+fW4b5gYLyUBsBnUDc0EOXKVNRzlmX7ZXbvKHXDjK0=
 # SIG # End signature block
