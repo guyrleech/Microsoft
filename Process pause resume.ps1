@@ -355,6 +355,12 @@ Begin
             }
         }
 
+        ## array may have been flattened so resurrect
+        if( $name.Count -eq 1 -and $name[0].IndexOf( ',' ) -ge 0 )
+        {
+            $name = @( $name -split ',' )
+        }
+
         if( ! ( $id = @( Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { ( $allSessions -or $_.SessionId -eq $thisSessionId ) -and $_.Id -ne $pid } | Select-Object -ExpandProperty Id ) ) -or ! $id.Count )
         {
             if( ! $quiet )
@@ -404,8 +410,8 @@ End
 # SIG # Begin signature block
 # MIINRQYJKoZIhvcNAQcCoIINNjCCDTICAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUE+MUsLfOFe1jlwAUW0kWyapv
-# fLagggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU6A6dkNtk1jdWj70VdIpqak5R
+# owCgggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -466,11 +472,11 @@ End
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAT946rb3bWrnkH02dUhdU4wCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFIiBJO5wtD8BQa4fQvnf
-# CjkpOXbAMA0GCSqGSIb3DQEBAQUABIIBAFtj5EeBqemvERw8gvNAWYGGRjGNJhq2
-# Q3hUYwyYkOsv5tNxoKv6AgL7QI9Nx9tg2+DEBzIPBwmA0IO9PUECvHIAzu0JNTjP
-# U90Zg8OxQY+vymycGux2btK4qXpr+CeAhw/wwI75Dti5Zv8FrWaQeEf7aoaCdUoH
-# 22uBu3P4PoMBp7qweOu3e5RZACX8o7oRKkbcooD7HyYPZpcJXQrDUykbYL6GzrWR
-# LIlZ2hq0o37KBM4LS2bBM/EUZNm9E+m8+Z1imnLijAumXszRBhwgs6jpwl1bWiS+
-# GU24gmZAVqu6X+fW4b5gYLyUBsBnUDc0EOXKVNRzlmX7ZXbvKHXDjK0=
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFMBlIOuIbAgsDn2BmKOg
+# oYvWAuIwMA0GCSqGSIb3DQEBAQUABIIBAC4j807p001YVjW2F7WmrB63x0tRA2Ue
+# yZmaTZnvX4mVkip9S/vqDsv5etmK/EInYvaiyDzlh08CovKAwGqb0UfVMPzSUqWT
+# vJM3WxLiplFeoUDhQlolg+U4gusA81PnfBZu1PU7Bya5kEeYBdAx0LR4JvzC8Iyw
+# ZaSK6oXMXSNdkrI/9B5OW5qQa1GlSuSkoUUDh44ccYr30YQm2d3BvoZE+8ZM5HKd
+# cqcrvFEy9Af83m+eRAuf57nWbOsn54SzGDn2VFsooY9Owm+DHhowI8VDfry1zUF4
+# rhq56XpbCp4OPMEg5bRQBwwHNkqlOXlzUG28rYOWOtQd/T8yU5c44So=
 # SIG # End signature block
