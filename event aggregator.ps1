@@ -16,6 +16,7 @@
     20/07/20   GRL   Added -provider argument
     22/07/20   GRL   Fixed duplicate entries produced by duplicate events logs returned for providers
     25/09/20   GRL   Added minutes past hour functionality for troubleshooting recurring problems
+    31/05/21   GRL   Added -credential parameter
 #>
 
 <#
@@ -38,6 +39,10 @@ Show events logged in the preceding period where 's' is seconds, 'm' is minutes,
 .PARAMETER duration
 
 Show events logged from the start specified via -start for the specified period where 's' is seconds, 'm' is minutes, 'h' is hours, 'd' is days, 'w' is weeks and 'y' is years so 2m will retrieve events for 2 minutes from the given start time
+
+.PARAMETER credential
+
+Credential to use to remote to the specified computer(s). If $null is passed, a credential will be prompted for.
 
 .PARAMETER message
 
@@ -167,6 +172,7 @@ Param
     [switch]$noGridView ,
     [switch]$overWrite ,
     [switch]$passThru ,
+    [PSCredential]$credential ,
     [string[]]$computer = @( 'localhost' )
 )
 
@@ -385,6 +391,17 @@ elseif( $PSBoundParameters[ 'minutes' ] )
     {
         $computerArgument.Add( 'ComputerName' , $thisComputer ) ## not the most efficient way of doing this but it's better than having to do it manually!
     }
+    if( $PSBoundParameters.ContainsKey( 'credential' ))
+    {
+        if( ! $credential )
+        {
+            $credential = Get-Credential -Message "For $($computer.Count) remote event logs"
+        }
+        if( $credential )
+        {
+            $computerArgument.Add( 'credential' , $credential )
+        }
+    }
 
     [string[]]$eventLogsToSearch = $eventLogs
 
@@ -420,8 +437,8 @@ if( $command -ne 'Export-CSV' )
 # SIG # Begin signature block
 # MIINRQYJKoZIhvcNAQcCoIINNjCCDTICAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUfQAw6FSSigKpwXtPjHNGUasT
-# hn2gggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUyggCQU+tCaR4Bl9XcMCahhKr
+# U26gggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -482,11 +499,11 @@ if( $command -ne 'Export-CSV' )
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAT946rb3bWrnkH02dUhdU4wCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFKgYGclRWY4bIcQyArIP
-# 64eVjL9lMA0GCSqGSIb3DQEBAQUABIIBAHmly7sbGXjb1ZxiJVFbo8/XU7tVThJC
-# 04QiywCYcR2txfzXCHIBHDbmrxDjrveuf4yYjzXVQTcjFJ2BTdiiVhMGcg6iY1ru
-# t+V6fycXtJx01RcXZitA9VLqrdEByVLjOR348ut59NKLdlzyNTv1NDILzYfXYuX8
-# /YH9482ZA62ox9AthGi4hundZPqdE/LMNfWVYRS90KK/OrJd+IKIya3rCT8vnbwm
-# ydaM5GeEtZiA7PKb+5E16xNpeDYZ6hWHmIugPAxmwLpXbPK1KP5zXk6bNH4KTsGO
-# 2zpf7V9iiMFQQKg5JfytMtoISF8Sjd9ZArakbCtFDtYyzaAE8r0iwmw=
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFGnNaSDwAQfk8s70WhTI
+# 3jYAGPo6MA0GCSqGSIb3DQEBAQUABIIBAKuUy40fiBZSqtlMuZYPVlbkpf/yZLKA
+# tqARX7N6bASK0EC5HjjVMlhhha8RfRh0cIK+mTMDGC5anxQB1FGoewrn3oac/ph1
+# AbHJed5u2WCVpizG/N82LATvYgZImHLOKzodI9GC8Dx/ef7dbKmtza5dwcKXu0xK
+# BrXhv0cAMyXXdAQDgCPehK9lTahAk2Uzu2/EP1OnHUG7idinAUV/uAluJfm9KWf6
+# 759dqAmgRYwQrKp7YlyTmhFoej/Er+ZGNQBABW/03kqDzuvx6EVbJCq5NRgTwBC2
+# F483zD6TmAmIYBHLaCO7X0EK5l3F4sPNDoQTd3mzgu/VxBM2ut6wF1k=
 # SIG # End signature block
