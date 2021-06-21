@@ -10,4 +10,4 @@ Other scripts I have written but are available elsewhere include:
   * Easily remoted
   * No elevation required (scenario dependent)
 
-[https://www.parallels.com/blogs/ras/process-created-watcher-script/](url)
+[https://www.parallels.com/blogs/ras/process-created-watcher-script/](https://www.parallels.com/blogs/ras/process-created-watcher-script/)
