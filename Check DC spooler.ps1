@@ -41,12 +41,15 @@ Enable the spooler service on the two machines listed without asking for confirm
 
 https://msrc.microsoft.com/update-guide/en-US/vulnerability/CVE-2021-1675
 
-@guyrleech 02/07/2021
+Modification History
+
+@guyrleech 02/07/2021   Initial release.
+                        Code around error because Server 2012R2 not providing StartupTye property from Get-Service
 
 #>
 
 <#
-Copyright © 2021 Guy Leech
+Copyright (c) 2021 Guy Leech
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, 
 including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -99,8 +102,9 @@ $domainControllers | Write-Verbose
 
 if( $spoolers -and $spoolers.Count )
 {
+    [array]$disabled = @()
     $running  = @( $spoolers.Where( { $_.Status    -eq 'Running' } ) )
-    $disabled = @( $spoolers.Where( { $_.StartType -eq 'Disabled' } ) )
+    $disabled = @( $spoolers.Where( { $_.PSObject.Properties[ 'StartType' ] -and $_.StartType -eq 'Disabled' } ) )
     Write-Verbose -Message "Found $($spoolers.Count) $serviceName services on $($domainControllers.Count) domain controllers with $($running.Count) running & $($disabled.Count) disabled"
     
     [string]$operation = $null
@@ -191,8 +195,8 @@ else
 # SIG # Begin signature block
 # MIINRQYJKoZIhvcNAQcCoIINNjCCDTICAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUQZWgeeZ3ojBypBV28yc2+A9s
-# d6ygggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUz1qK0ThiEkJ9EtmVNiHa5Ztr
+# RTCgggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -253,11 +257,11 @@ else
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAT946rb3bWrnkH02dUhdU4wCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFGrND2h1oYo30jxtDQgX
-# kkXjArFeMA0GCSqGSIb3DQEBAQUABIIBAIfQIB1Jx4yRcxC2Y5Tdefe3uWMaO5zQ
-# q9cjeYsD9dUb+zm/JUUay0Wwnrpy4NIi2AxcbH+EPeoIE+hYpG/UnVbmIzBXPs3P
-# h09CQISQFojKu5eTb60pVt7QjPkIXi5oVytNvCV+p68ciqFqF5+J1cD3bKV679nB
-# MabxBULpTtv0jkmv8qY9Xy7r3tXBD/wiSj9vG5ybvT5+cCXulrqIxy3GUWr1rH38
-# nuQ8EOF6CW6t+ZziMTKpAcj7yA3dwPYscYdKVPHPX5d2nrwCvup0QPLVC+GZYqyM
-# c6fsjQ4JcIfm0qfycle6f9ToTvyjYj6PWyNWrtChR7hEihCqdVJBU0s=
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFO/XIn6Q/2wjRP8iBBgC
+# MmxQp9eyMA0GCSqGSIb3DQEBAQUABIIBAFF5oZKQV2aYYjmr9gAqLhDvHJTzrWx4
+# OoTi1TY5XGmYxuYtarPn+prsqdKDU3bgZvRYPYA5NP8vg0emhr58WGfomZokUNjQ
+# qUwbJBb0x4Qg/Vn9wFCgssseEDYBUmMUOoHJbIaSmds0qgJCB9SjdzTc6QPsF7ki
+# 6qyjpCJTKc7nFgw22BcnUs2PdRrxNtR2h8+RbAF7X3htHH0T44LSzowgS2+CD0/f
+# PCG0JeCrQmGF6xljRx4sVHWXOdAIFibZGzXN7mkPmx1RNhl4d0agv8OodZjkfSXl
+# 858mJXWPGhWeWzZ+8yLWSbm/Eb91owf9pxb2EC8SP+6M0iYT83D175o=
 # SIG # End signature block
