@@ -46,6 +46,8 @@
                       Only get logon sessions if logn times or sessions requested as very slow when sessions are high
 
     23/02/21    GRL   Moved win32_systemaccount query to be run only if the hashtable is required
+
+    13/08/21    GRL   Added -allTerminations
 #>
 
 <#
@@ -157,6 +159,10 @@ Show a summary by executable including number of executions and file details
 
 A comma separated list of computers to run query the security event logs of. Firewall must allow Remote Eventlog.
 
+.PARAMETER allTerminations
+
+Search for process termination events up to the current time rather than just in the time window specified by -start and -end
+
 .EXAMPLE
 
 & '.\Get Process Durations.ps1' -last 2d -logon -username billybob -boot
@@ -251,7 +257,8 @@ Param
     [string]$outputFile ,
     [switch]$nogridview ,
     [switch]$noFileInfo ,
-    [switch]$excludeSystem 
+    [switch]$excludeSystem ,
+    [switch]$allTerminations 
 )
 
 [string[]]$startPropertiesMap = @(
@@ -1008,6 +1015,12 @@ if( $notParents -and $notParents.Count -and $notParents[0].IndexOf( ',' ) -ge 0 
             [hashtable]$stopEventFilter = $startEventFilter.Clone()
             $stopEventFilter[ 'Id' ] = 4689
 
+            ## if -allTerminations specified, we'll trawl the event log until now to ensure we get the process end event if its there
+            if( $allTerminations -and $stopEventFilter.ContainsKey( 'EndTime' ) )
+            {
+                $stopEventFilter.Remove( 'EndTime' )
+            }
+
             Write-Verbose -Message "$(Get-Date -Format G): getting termination events"
 
             Get-WinEvent @remoteParam -FilterHashtable $stopEventFilter -Oldest -ErrorAction SilentlyContinue | . { Process `
@@ -1636,11 +1649,12 @@ else
         }
     }
 }
+
 # SIG # Begin signature block
 # MIINRQYJKoZIhvcNAQcCoIINNjCCDTICAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUcdY6rWgM5sw0v+xk6sgbO4Tt
-# teugggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUThH0LsuESX6fs+EMylN85tiF
+# /H+gggqHMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -1701,11 +1715,11 @@ else
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAT946rb3bWrnkH02dUhdU4wCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFGb5Cyox/uWDAvIGPSos
-# SxfDKLAxMA0GCSqGSIb3DQEBAQUABIIBAG3ecRMey7Y+pzPZTBJfT+oi1VqWZNug
-# WshMIzOvwq/imjhz+ZEHu5cTKravyJxgEYXml3C52D1aN8WV03ECPc77oAp2KdxL
-# fpabVdYsMe7COyIKzO4r8Mj4YUFBP/GKzc8j5v7fF0nrJfxWmm0UY6piuQTU+PeQ
-# bqTUcN6YQUcoSk1LaPUkWQv3b7ePZlimogk73zF1FfYJLo3xyC6/l0wenmvtMGou
-# k4AGm0L1FBkzQNZtU0k+1GjnWkAzulgfi9hGV6zqeA8+fQltlxUT7LYOKIDpNWDh
-# 5RHugh2WkItO4PeS8P97dIL9WgPzwuux8gEarUK4x/I3674MAvFXQHk=
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFDUTmSJ6JN1LUCPUFfg1
+# XjJybeH1MA0GCSqGSIb3DQEBAQUABIIBAIKeA3QvI3gpoxsnX7ITcaoux1CVnvO9
+# xpbkMiwG2fEZiCYTqLHIaM1r/zQWUo8GgKllJU2h1LICWWSvD5hObNYHBSNuqGcs
+# 5UfyDNT9I240EQ16HydU74fzwQxsetpM1zmu8QZQ4Vz+33ceyqXT+AWIBOEXwtBq
+# 2hdmGX1awWdZJA69SVLbo6kZdheMjpug1PYjq+tELRGUMpyowp3V8alhDOK6t/1E
+# XA6cdQeBaKYX+XQ2uij2cMMd0PKyhL4GOxLR2G3RlbYTSZsOr4lWsQU5lpuxAroe
+# /YzycPvdeByVCyR/h5sy8NlaQmEYrXEa4nPux3RG+jdFaPZ/0GzXPvk=
 # SIG # End signature block
