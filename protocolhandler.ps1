@@ -1,4 +1,6 @@
-﻿<#
+﻿#requires -version 3
+
+<#
 .SYNOPSIS
     Get a URL in the argument and call different apps depending on what it is
 
@@ -9,6 +11,11 @@
      C:\Scripts\protocolhandler.ps1 guyrleech:msedge:https://guyrleech.wordpress.com
 
      Open https://guyrleech.wordpress.com in Microsoft Edge
+
+.EXAMPLE
+     C:\Scripts\protocolhandler.ps1 guyrleech:msedge:++get_clipboard++
+
+     Open whatever text is currently in the Windows clipboad in Microsoft Edge
 
 .NOTES
     Setup the handler in the registry:
@@ -44,9 +51,26 @@ if( $null -eq $components -or $components.Count -lt 2 )
 $launchError = $null
 $process = $null
 
+[string]$argument = $components[2]
+
+## process special URLs
+
+[hashtable]$arguments = @{}
+
+if( $argument -ieq '++get_clipboard++' )
+{
+    $argument = Get-Clipboard -Format Text
+}
+
+if( $null -ne $argument )
+{
+    $arguments.Add( 'ArgumentList' , $argument )
+}
+## else no argument was specified so don't pass any argument to start-process
+
 try
 {
-    $process = Start-Process -FilePath $components[1] -ArgumentList $components[2] -PassThru -ErrorVariable launchError
+    $process = Start-Process -FilePath $components[1] @arguments -PassThru -ErrorVariable launchError
 }
 catch
 {
