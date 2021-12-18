@@ -1,16 +1,12 @@
-﻿
-<#
+﻿<#
 .SYNOPSIS
     Listen on a network port
 
 .DESCRIPTION
     Demonstration of how to setup a network listener and fetch data. Watch out for existing firewall rules that block the PowerShell process from receiving data
 
-.PARAMETER port
-    The port to listen on
-    
-.PARAMETER ipaddress
-    The local IP address, or pattern, to listen on. A pattern must only match a single address
+.PARAMETER ipaddressAndPort
+    The local IP address, or pattern, to listen on and the port, separated by a colon. An address pattern must only match a single address
 
 .PARAMETER bufferlength
     The length of the receive buffer to read incoming data into. Will issue multiple reads if the data quantity exceeds this value
@@ -19,15 +15,17 @@
     How long to run the server for in minutes. If zero or not specified, will run indefinitely
 
 .EXAMPLE
-    & '.\network listener.ps1' -ipaddress 192.168.0.* -port 4242 -Verbose
+    & '.\network listener.ps1' -ipaddressAndPort 192.168.0.*:4242 -Verbose
 
-    iwrListen on port 4242 on the local IP address which matches 192.168.0.* and output any incoming text data
+    Listen on port 4242 on the local IP address which matches 192.168.0.* and output any incoming text data
 
 .NOTES
 
     Modification History:
 
     2021/12/18  @guyrleech  Initial release
+    2021/12/18  @guyrleech  Changed output to build a string & output when all data received to avoid long data, eg. text files, being broken across multiple lines.
+                            Changed -port and -ipaddress parameters to be just -ipaddressAndPort
 #>
 
 [CmdletBinding()]
@@ -35,11 +33,18 @@
 Param
 (
     [Parameter(Mandatory=$true)]
-    [int]$port ,
-    [string]$ipaddress ,
+    [string]$ipaddressAndPort ,
     [decimal]$runTimeMinutes ,
     [int]$bufferLength = 256 
 )
+
+[int]$port = -1
+[string]$ipaddress , $port = $ipaddressAndPort -split ':'
+
+if( $port -le 0 )
+{
+    Throw "Must specify a port number, eg. -ipaddressAndPort 192.168.0.42:4242"
+}
 
 $IPendPoint = $null
 $TcpListener = $null
@@ -52,7 +57,7 @@ try
     {
         if( -Not ( $ourIpAddress = Get-NetIPAddress -AddressState Preferred | Where-Object IPAddress -like $ipaddress ) )
         {
-            Throw "Unable to find IP address for $ipaddress"
+            Throw "Unable to find valid IP address for $ipaddress"
         }
         elseif( $ourIpAddress -is [array] )
         {
@@ -94,18 +99,25 @@ try
         if( $endtime )
         {
             $waitPeriod = New-TimeSpan -End $endtime
-            Write-Verbose -Message "$(Get-Date -Format G): waiting for $($waitPeriod.TotalSeconds) seconds"
-            $result = $task.Wait( $waitPeriod )
+            if( $waitPeriod.TotalSeconds -gt 0 )
+            {
+                Write-Verbose -Message "$(Get-Date -Format G): waiting for $($waitPeriod.TotalSeconds) seconds"
+                $waitResult = $task.Wait( $waitPeriod )
+            }
+            else
+            {
+                break
+            }
         }
         else
         {
-            if( $null -eq ( $result = $task.Wait() ))
+            if( $null -eq ( $waitResult = $task.Wait() ))
             {
-                $result = $true
+                $waitResult = $true
             }
         }
 
-        if( $result -and ( $client = $task.Result ))
+        if( $waitResult -and ( $client = $task.Result ))
         {
             Write-Verbose -Message "$(Get-Date -Format G): received $($client.Client.Available) bytes from $($client.Client.RemoteEndPoint.ToString())"
             $stream = $null
@@ -118,10 +130,19 @@ try
             }
             if( $stream )
             {
+                [string]$output = $null
+
                 while( ( $bytesRead = $stream.Read( $bytes , 0 , $bufferLength )) -gt 0 )
                 {
-                    [System.Text.Encoding]::UTF8.GetString( $bytes, 0, $bytesRead )
+                    [string]$chunk = [System.Text.Encoding]::UTF8.GetString( $bytes, 0, $bytesRead )
+                    if( $chunk )
+                    {
+                        $output = -join ( $output , $chunk )
+                    }
                 }
+
+                Write-Verbose -Message "$(Get-Date -Format G): output data length is $($output.Length)"
+                $output
                 $stream.Close()
             }
             $client.Close()
@@ -145,8 +166,8 @@ finally
 # SIG # Begin signature block
 # MIIZsAYJKoZIhvcNAQcCoIIZoTCCGZ0CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUbtxU5L6Wvh8h+wViQJIKLUA2
-# 5S2gghS+MIIE/jCCA+agAwIBAgIQDUJK4L46iP9gQCHOFADw3TANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUqN+HK4QCwiQLpG4CJ15QA3tN
+# y0GgghS+MIIE/jCCA+agAwIBAgIQDUJK4L46iP9gQCHOFADw3TANBgkqhkiG9w0B
 # AQsFADByMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMTEwLwYDVQQDEyhEaWdpQ2VydCBTSEEyIEFz
 # c3VyZWQgSUQgVGltZXN0YW1waW5nIENBMB4XDTIxMDEwMTAwMDAwMFoXDTMxMDEw
@@ -262,23 +283,23 @@ finally
 # cmVkIElEIENvZGUgU2lnbmluZyBDQQIQBP3jqtvdtaueQfTZ1SF1TjAJBgUrDgMC
 # GgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYK
 # KwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG
-# 9w0BCQQxFgQUCVVWvfkzZPVU+oksuEMnJbKoatowDQYJKoZIhvcNAQEBBQAEggEA
-# DXJrPSC2gK8t/JI4bJF7k9W+9T5nDS8O1BLcqMu2Fjx1sGBTki05hq6FOTINiChR
-# CUTdrvKsMQx6a17UkU/Jn1+YdZJQx4cQ5AzgZ6+yT+SQwyIdrauOqUi/i3Vps0Vs
-# lqF6N4BSs8gHfVyTKT4vBe77EOmA0oKkOOz7RrNWuOs5icV+XFPzkeDeHXFFQS45
-# /hG2k1NZidH5IbRKy1QOa05dLv8hPJ/4kLoxjPbI2OEGDUKAHbplS1pmjV3WZdNA
-# MP01RUS35QT7lU+MpnixSr3amk51e25q/xn3fuEbMgL+2dXlVJY0epBqj7g+Z23D
-# Bnnnk8CgLE2rFEaJ4my5BaGCAjAwggIsBgkqhkiG9w0BCQYxggIdMIICGQIBATCB
+# 9w0BCQQxFgQUSR2SbbyqwOz28uvDhdZlKSVGOeEwDQYJKoZIhvcNAQEBBQAEggEA
+# OUi7WkRcC2nqcJfBV54UEgsYiADdk9OR02aLOWqUi8KNTV18+nXD5z+7CkZTpO0g
+# 5HBy1ZDvZR5zZ5yZPzkuXWMWj6AwFsi2RF1badu/aOwzoIrget0OHduIouxc/TqP
+# RV7rskeH26BvhIb98NlfwuXk/ETH40A69AABSAPBpd9wfTnyomqae77l7JGp/Apo
+# eEAvvrymOmPJi1G3GZRgh5A6Bd3AOZzFGzdq9kcAE4yXnHaXFcKpR1G2D6KKyn2k
+# dfr32s0QfvdnCpLTUk8MMJXF5oCylH8ifP9T3dhHHswAP7CJ6SR4R+Lh5rdtcohc
+# T58bt69udTwPpSOETmb1AKGCAjAwggIsBgkqhkiG9w0BCQYxggIdMIICGQIBATCB
 # hjByMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQL
 # ExB3d3cuZGlnaWNlcnQuY29tMTEwLwYDVQQDEyhEaWdpQ2VydCBTSEEyIEFzc3Vy
 # ZWQgSUQgVGltZXN0YW1waW5nIENBAhANQkrgvjqI/2BAIc4UAPDdMA0GCWCGSAFl
 # AwQCAQUAoGkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUx
-# DxcNMjExMjE4MTkzMjMwWjAvBgkqhkiG9w0BCQQxIgQgkiJ7fpm94u1QYZTQ8z4s
-# 5vfYYLOFF0/3TFCQ3bM6fEwwDQYJKoZIhvcNAQEBBQAEggEAVlFEBk7UgFo55lTA
-# 74R9iI6VbSNhYnvEtINHlNeIG51itAyROE4jTGGvxKQzAvp/Kgn9f4a4mMWF8vDH
-# 32l6FhzkNQIWvgrAMwJ27gOtKaMR9APBi91cy4YxOsnj7I18dxilxGb+axFTxTz/
-# eHW6cWZxlVOJl6//LP1ySsrQrfBEhU07POniKt+dY14L3t6eikCvQItWpOBROKIb
-# fNURqH9HnbQpWphL7UzoE1DVcZyIs7bp4ptoJULp3UZuZafeF2ncJuONJm17iSBq
-# kYbsOrrTeYjwoq5DbJQhzaKBKG6sCwmzYPw/S/tq5Yy3XLsDU4CjTtVmCu9cFIYB
-# 4q9A3g==
+# DxcNMjExMjE4MjE0NjE5WjAvBgkqhkiG9w0BCQQxIgQgr5O/Fv8KxpT+Ebh5SAGI
+# lvyE0ZA/d54ej914Ji7AASUwDQYJKoZIhvcNAQEBBQAEggEALZK7xY9g8INFXiFt
+# gwLsA9CCXEYwV4SyVMONHhvKru/ERgJvJfvu7nymHejSD/gTMY1p3XCZVj8yh9Kx
+# 55++ciYInm/UzMZglHN9u0/x8XzhSw4KQ9JHO8KWXPCjrllaWTY+vX/dVxjMETt/
+# XwcxYbAgXPgcaJCFcL49Lne7cA+9bXemgV/zIkdNkircNv4Tq4I93bs4l7hlfOlK
+# iTYlcaBV15tHFYDL0usWJJR/+ZdtYiDn93obEynHQ1t75M3LAiJOZefWbfkqtl1B
+# a++7kFhczOKcZS6DIiqWimL+fZztzTCojQsM7q0UV0Lhbp02cpJ/i6TRhimKMxw7
+# xt5XHg==
 # SIG # End signature block
