@@ -21,6 +21,19 @@
     2021/12/20  @guyrleech  Initial release
 #>
 
+
+<#
+Copyright © 2021 Guy Leech
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, 
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#>
+
 [CmdletBinding()]
 
 Param
@@ -142,7 +155,7 @@ Begin
         }
         else
         {
-            Throw "Failed to get process handle"
+            Write-Error "Failed to get process handle"
         }
     }
 }
@@ -214,8 +227,8 @@ Process
 # SIG # Begin signature block
 # MIIZsAYJKoZIhvcNAQcCoIIZoTCCGZ0CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUswByuNq/dtT/eQiUPu3nVoLP
-# w5WgghS+MIIE/jCCA+agAwIBAgIQDUJK4L46iP9gQCHOFADw3TANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU4baUkfNOb2TqlXV6yQUwk1J0
+# MEagghS+MIIE/jCCA+agAwIBAgIQDUJK4L46iP9gQCHOFADw3TANBgkqhkiG9w0B
 # AQsFADByMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMTEwLwYDVQQDEyhEaWdpQ2VydCBTSEEyIEFz
 # c3VyZWQgSUQgVGltZXN0YW1waW5nIENBMB4XDTIxMDEwMTAwMDAwMFoXDTMxMDEw
@@ -331,23 +344,23 @@ Process
 # cmVkIElEIENvZGUgU2lnbmluZyBDQQIQBP3jqtvdtaueQfTZ1SF1TjAJBgUrDgMC
 # GgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYK
 # KwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG
-# 9w0BCQQxFgQUPmdNds+wuJ4R/VTGZe2uRvJVfqkwDQYJKoZIhvcNAQEBBQAEggEA
-# h/hACF8F/XueZUilhMWPOnCuN/4dkGOPY+7uFE8QjNiHrGVXH05+wR8XVIuG6w6H
-# YWIbNn4MCmTJxjcJ1oMvFKR8g7Tpn2LLNPCQhwaIpVzUXJdcaK228OVyCp2FcA1d
-# uzDcUt6damwV9IXQ1CCU+BtjHHjjPKMl6BIEwfHLQXVX3khTQvUJcQDrZRDYa2ij
-# 31Z6h+aul3wigfHno2VN32/L6/04llbqyzwyozCEfWNM7uUZ+DIfkSrnFza/P1Ks
-# 8y0F0B0qPzXUz8FtNVoFeJp4ESuGPO4c3mJx11zptb3DlyD0yCOpo8EdZQoMYvtN
-# 5pGlZDCbJk3lrEhRpgYlRaGCAjAwggIsBgkqhkiG9w0BCQYxggIdMIICGQIBATCB
+# 9w0BCQQxFgQUDkh2ioDJHbb+xDl2evrxNcbPSlQwDQYJKoZIhvcNAQEBBQAEggEA
+# n6yHLMlhlFsHNaBntdWYMV/cHYXhj8Ed5OU44k5LSUDEGYIoESD7MFni6IjO3PqN
+# ljouTuLuwLujX1d12HX26EVkocyMwaCJNxny/4F/fYBrlsMyEd13e1Y0NDxgk1l1
+# R+WSI0zupvzzJE2nfzz/3lTsScwqycnMCqS52H6QIqhn4LVjPlIVWue/y/0zWe5R
+# MSiMMOuFq4eQXgV5bAZZTquChMdvtb4kP6V1vuW3BJGFafcWeHEojCIzMU2AOIAq
+# 8uIi4tQsO3PNqlym50FNtRidE84KGd1Z/MZ9H0sDFyP6YwCWG9xgPK59rsve3eaY
+# YGZKqmKnYr34IfrChNRMoKGCAjAwggIsBgkqhkiG9w0BCQYxggIdMIICGQIBATCB
 # hjByMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQL
 # ExB3d3cuZGlnaWNlcnQuY29tMTEwLwYDVQQDEyhEaWdpQ2VydCBTSEEyIEFzc3Vy
 # ZWQgSUQgVGltZXN0YW1waW5nIENBAhANQkrgvjqI/2BAIc4UAPDdMA0GCWCGSAFl
 # AwQCAQUAoGkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUx
-# DxcNMjExMjIwMjM0NDU0WjAvBgkqhkiG9w0BCQQxIgQgvJXUrK55kxC4NNpdLMRo
-# 9Fr/wEsK9eS7KLkxScISDoEwDQYJKoZIhvcNAQEBBQAEggEAeQ+1m02COIjwqwPn
-# mC8KOrgQt3Wxwd2C2SiTxoDTPpvckMcADtFI+tRItu++wYojbH0rND3vImE71675
-# 2mDrotvwlTgZ1UOoyyOl3Kiccmjcd1OxL+aql4Xxkpnb/f4NKTeNFKdwIIHZYBRl
-# T2k2RLUaMgtvYciV1bjl8cfi+KBvHMeL299eN4Zjzt12taxinDWp+BKeRGdb63Oz
-# X/3yWZbmMj/yqToRUew+LnepetQbC19309jJu/EOYtVDEgH+LhdxVKQbve9jnshM
-# f0t9ViRFvsaunTzUK0ZOt1djlkt6MAVd+SsaBjWDSVS4wusU3lTRis8SLqTza1J2
-# QImoWQ==
+# DxcNMjExMjIwMjM1MTI5WjAvBgkqhkiG9w0BCQQxIgQgzF5DkfxZyicCtlhs8WYZ
+# KVfJrFVZbnfL8ECFv8IBz4EwDQYJKoZIhvcNAQEBBQAEggEAaW0zB9+5s2YYy/uc
+# IeRMlqoZPlt8v28yvMJMMvHvvZAOrstQBm7nw6zuBJRd7ulVW+PcUMtLHlYGKMxO
+# 2BHkxWFNtWuG18UnV77ZTJQv7blr+pu34EhdepQ+z1JNoZO+bf0X8Hq9K5TmtlEe
+# Dmi7b874XMIMx6SERE6vdDRqOQlbz9o6daofegvXQeg4Zyt86DPqYs54zrWpnKQU
+# HD5l445VRawOFogNllf4lFzB9nDqfDcGPoYC8xNnss3+juxXtiTSV9xAVaqIo17q
+# o2YG+wGCwy0qQNsIZ+BCs95za0oxyKAxXrEqA2vT87b2iW+ukGobLBKBuynGq75K
+# 2qshWA==
 # SIG # End signature block
