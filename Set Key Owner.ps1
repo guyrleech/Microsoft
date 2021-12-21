@@ -20,6 +20,7 @@
 
     2021/12/20  @guyrleech  Initial release
     2021/12/20  @guyrleech  Fixed bug on base key splitting
+    2021/12/21  @guyrleech  Fixed handle leaks
 #>
 
 
@@ -96,54 +97,53 @@ Begin
         public class AdjPriv
         {
             [DllImport("advapi32.dll", ExactSpelling = true, SetLastError = true)]
-
             internal static extern bool AdjustTokenPrivileges(IntPtr htok, bool disall,
 
             ref TokPriv1Luid newst, int len, IntPtr prev, IntPtr relen);
+
             [DllImport("advapi32.dll", ExactSpelling = true, SetLastError = true)]
-
             internal static extern bool OpenProcessToken(IntPtr h, int acc, ref IntPtr phtok);
+            
             [DllImport("advapi32.dll", SetLastError = true)]
-
             internal static extern bool LookupPrivilegeValue(string host, string name, ref long pluid);
-            [StructLayout(LayoutKind.Sequential, Pack = 1)]
 
+            [DllImport( "kernel32.dll",SetLastError = true )]
+            public static extern bool CloseHandle( IntPtr hObject );
+            
+            [StructLayout(LayoutKind.Sequential, Pack = 1)]
             internal struct TokPriv1Luid
             {
                 public int Count;
                 public long Luid;
                 public int Attr;
             }
-            internal const int SE_PRIVILEGE_ENABLED = 0x00000002;
 
+            internal const int SE_PRIVILEGE_ENABLED = 0x00000002;
             internal const int SE_PRIVILEGE_DISABLED = 0x00000000;
 
             internal const int TOKEN_QUERY = 0x00000008;
-
             internal const int TOKEN_ADJUST_PRIVILEGES = 0x00000020;
+
             public static bool EnablePrivilege(long processHandle, string privilege, bool disable)
             {
                 bool retVal = false;
-                TokPriv1Luid tp;
                 IntPtr hproc = new IntPtr(processHandle);
                 IntPtr htok = IntPtr.Zero;
 
-                retVal = OpenProcessToken(hproc, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, ref htok);
-
-                tp.Count = 1;
-
-                tp.Luid = 0;
-                if(disable)
+                if( retVal = OpenProcessToken(hproc, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, ref htok) )
                 {
-                    tp.Attr = SE_PRIVILEGE_DISABLED;
-                }
-                else
-                {
-                    tp.Attr = SE_PRIVILEGE_ENABLED;
-                }
-                retVal = LookupPrivilegeValue(null, privilege, ref tp.Luid);
+                    TokPriv1Luid tp;
+                    tp.Count = 1;
+                    tp.Luid = 0;
+                    tp.Attr = disable ? SE_PRIVILEGE_DISABLED : SE_PRIVILEGE_ENABLED ;
 
-                retVal = AdjustTokenPrivileges(htok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+                    if( retVal = LookupPrivilegeValue(null, privilege, ref tp.Luid) )
+                    {
+                        retVal = AdjustTokenPrivileges(htok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+                    }
+
+                    CloseHandle( htok ) ;
+                }
 
                 return retVal;
             }
@@ -220,6 +220,8 @@ Process
         {
             Write-Warning -Message "Failed to create ACE for $user"
         }
+        $key.Close()
+        $key.Dispose()
     }
     else
     {
@@ -230,8 +232,8 @@ Process
 # SIG # Begin signature block
 # MIIZsAYJKoZIhvcNAQcCoIIZoTCCGZ0CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUQb5XnyezfffcUsKAaOyNSEg5
-# VE6gghS+MIIE/jCCA+agAwIBAgIQDUJK4L46iP9gQCHOFADw3TANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUKYB0azM+XFsL/hxdmnY6lPTc
+# T6ugghS+MIIE/jCCA+agAwIBAgIQDUJK4L46iP9gQCHOFADw3TANBgkqhkiG9w0B
 # AQsFADByMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMTEwLwYDVQQDEyhEaWdpQ2VydCBTSEEyIEFz
 # c3VyZWQgSUQgVGltZXN0YW1waW5nIENBMB4XDTIxMDEwMTAwMDAwMFoXDTMxMDEw
@@ -347,23 +349,23 @@ Process
 # cmVkIElEIENvZGUgU2lnbmluZyBDQQIQBP3jqtvdtaueQfTZ1SF1TjAJBgUrDgMC
 # GgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYK
 # KwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG
-# 9w0BCQQxFgQUXgZmIxEvOpt4MqcngM1o2iLh4y0wDQYJKoZIhvcNAQEBBQAEggEA
-# Da4XvTB2Mc2ZKWrpkCFKpiPcmgxEO30d6BkVyA9ASFLi9rCdtdbkERaGL1sFHYYf
-# F+u0dgIy5qYulhkyfJW79vMZ043kSa3InncQcJJBF+8c+kot6k9r++NESbnJucP+
-# vhFLehXFc7LMFD+fUd9ULrU+5KsZ8bIr+rDzT3JOb46K6OdMKLn/hrLlvcScEC+c
-# rxvgGbMXW+Q2sS2xpySfPjNvLe0+J0tVz6WlBeGU0lKZebcBDwDoMNLyKdW8Lzws
-# rtp402w8EG1/w2Mz9aYzVyHZToBVkkHpthFbENdiDbCGxKYJFgUJtlkRMbh6qcEw
-# bUSa8xO88zB902uX/HIBVaGCAjAwggIsBgkqhkiG9w0BCQYxggIdMIICGQIBATCB
+# 9w0BCQQxFgQU1rTpYqdMG1WXQ0NoXp8nVlSrhkAwDQYJKoZIhvcNAQEBBQAEggEA
+# ArZTJKPg8h7S7/cTKifs89DestAfzFibg1PyWum0ELao+eTbhJp+AuV/7W7/2Lve
+# FTi2DY4u/jk9plFC6USWL82zu0p1D7kRtjZClDWAFJK4G3oEMaTC2svE5/wsUIkg
+# bv11vKggVqjlgalikoZzjWw8W9kOKHfRxGjfWq4YOxPpGihz4gIpc2OfMluVmS0V
+# ljjgiBd44ImrMa8Km9EHlq84ksD/9i3OJOakqxKI1/buaqmln93pUA8a/coyEFF+
+# 8VLOd1COpbAQtjRghx2U3l+L7DZhV6cUDlgtAY55mW+vMJCSZtWDRFbC/Y8MR8zw
+# +Lb+SduibwNlVOY9qpFi4qGCAjAwggIsBgkqhkiG9w0BCQYxggIdMIICGQIBATCB
 # hjByMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQL
 # ExB3d3cuZGlnaWNlcnQuY29tMTEwLwYDVQQDEyhEaWdpQ2VydCBTSEEyIEFzc3Vy
 # ZWQgSUQgVGltZXN0YW1waW5nIENBAhANQkrgvjqI/2BAIc4UAPDdMA0GCWCGSAFl
 # AwQCAQUAoGkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUx
-# DxcNMjExMjIxMDAyMzI0WjAvBgkqhkiG9w0BCQQxIgQglhw/9M3m5Kd4XoF8NLp1
-# 5YpPCWhfCnVzAmg7duHzL2QwDQYJKoZIhvcNAQEBBQAEggEAeSU9dtNdqWKyBxmW
-# tRZVsStgaJJMt9DygRICv4F1x5E4VRrE9eQm6Qucom6Qv042g70XP2hQEW7zMjNL
-# y9fatn5mE/HvektaDe9zbRPygHrfXToY5+h2rpoTeEv0peqpe4hivJIeBHVxuCS6
-# kx0TeXOHRptI1vC0cUq0kDPGIAqZmegM6N/jPNZNCNt5NIWjOzf+EPUPut29roD7
-# qFzYtn0ckGeaSEu+ho4Kmqkee1rC8XEeLx8ydP/sXArueu04y1a3maYBE5R68hF3
-# +YCzz+obQh/dh+quMNVkVb7v0BdLs6+F272NmGHd35MaLGm6iqwQjg5upG0XTlSn
-# EBTB3Q==
+# DxcNMjExMjIxMDk1OTU2WjAvBgkqhkiG9w0BCQQxIgQg/Pyy+P2fltIDrQBYOBTe
+# NWY0oBAbFlfbQfUXPI7oSUwwDQYJKoZIhvcNAQEBBQAEggEABvs5ssiatYyp7Esc
+# VIe7POepsCmiQ5k96YYK0R2eOo73w+ONVXd7i6o7DxXW7nc7uQ12LHYdsJsoASWs
+# u8siE5YUpSdrcXZ475VWoLhPyvh2wjSHvqsU/fDtlAfDvGFIjaAsi/K9E1pvHqdq
+# 2P75YIqELWqj6mdATgOR2s4+3tWy153PpyrJ8RqJniVqi25M6MsrywdmpmNto+Ho
+# NiVTHzlaSbv0OH8yhnXFYT5V1hcmxj/3A4h2jwF84LHHaws1tq1DKMjvuD7tFw6s
+# vo4NPHRN1aUhCHhNjwSXjE8AEJRIifJXNgK0XQE6PMuMeMZyM1oPJH3m952vZwio
+# 8eOEEg==
 # SIG # End signature block
