@@ -19,6 +19,7 @@
     Modification History:
 
     2021/12/20  @guyrleech  Initial release
+    2021/12/20  @guyrleech  Fixed bug on base key splitting
 #>
 
 
@@ -179,9 +180,9 @@ Process
     $baseKey = $null
 
     ## need to parse key so that we get the base/hive and subkey separately
-    if( $path -match '^(HK[^:]+):\\(.*)$' )
+    if( $path -match '^(HK[^\\]+)\\(.*)$' )
     {
-        if( -Not ( $baseKey = $keyBases[ $Matches[ 1 ] ] ) )
+        if( -Not ( $baseKey = $keyBases[ $Matches[ 1 ].Trim( ':' ) ] ) )
         {
             Throw "Unrecognised base key `"$($Matches[1])`" in $path"
         }
@@ -196,6 +197,8 @@ Process
     {
         Write-Warning -Message "Failed to get take ownership privilege"
     }
+
+    Write-Verbose -Message "Base key is $baseKey sub path is `"$subpath`""
 
     if( $key = $baseKey.OpenSubKey( $subpath , [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree , [System.Security.AccessControl.RegistryRights]::TakeOwnership ) )
     {
@@ -227,8 +230,8 @@ Process
 # SIG # Begin signature block
 # MIIZsAYJKoZIhvcNAQcCoIIZoTCCGZ0CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU4baUkfNOb2TqlXV6yQUwk1J0
-# MEagghS+MIIE/jCCA+agAwIBAgIQDUJK4L46iP9gQCHOFADw3TANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUQb5XnyezfffcUsKAaOyNSEg5
+# VE6gghS+MIIE/jCCA+agAwIBAgIQDUJK4L46iP9gQCHOFADw3TANBgkqhkiG9w0B
 # AQsFADByMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMTEwLwYDVQQDEyhEaWdpQ2VydCBTSEEyIEFz
 # c3VyZWQgSUQgVGltZXN0YW1waW5nIENBMB4XDTIxMDEwMTAwMDAwMFoXDTMxMDEw
@@ -344,23 +347,23 @@ Process
 # cmVkIElEIENvZGUgU2lnbmluZyBDQQIQBP3jqtvdtaueQfTZ1SF1TjAJBgUrDgMC
 # GgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYK
 # KwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG
-# 9w0BCQQxFgQUDkh2ioDJHbb+xDl2evrxNcbPSlQwDQYJKoZIhvcNAQEBBQAEggEA
-# n6yHLMlhlFsHNaBntdWYMV/cHYXhj8Ed5OU44k5LSUDEGYIoESD7MFni6IjO3PqN
-# ljouTuLuwLujX1d12HX26EVkocyMwaCJNxny/4F/fYBrlsMyEd13e1Y0NDxgk1l1
-# R+WSI0zupvzzJE2nfzz/3lTsScwqycnMCqS52H6QIqhn4LVjPlIVWue/y/0zWe5R
-# MSiMMOuFq4eQXgV5bAZZTquChMdvtb4kP6V1vuW3BJGFafcWeHEojCIzMU2AOIAq
-# 8uIi4tQsO3PNqlym50FNtRidE84KGd1Z/MZ9H0sDFyP6YwCWG9xgPK59rsve3eaY
-# YGZKqmKnYr34IfrChNRMoKGCAjAwggIsBgkqhkiG9w0BCQYxggIdMIICGQIBATCB
+# 9w0BCQQxFgQUXgZmIxEvOpt4MqcngM1o2iLh4y0wDQYJKoZIhvcNAQEBBQAEggEA
+# Da4XvTB2Mc2ZKWrpkCFKpiPcmgxEO30d6BkVyA9ASFLi9rCdtdbkERaGL1sFHYYf
+# F+u0dgIy5qYulhkyfJW79vMZ043kSa3InncQcJJBF+8c+kot6k9r++NESbnJucP+
+# vhFLehXFc7LMFD+fUd9ULrU+5KsZ8bIr+rDzT3JOb46K6OdMKLn/hrLlvcScEC+c
+# rxvgGbMXW+Q2sS2xpySfPjNvLe0+J0tVz6WlBeGU0lKZebcBDwDoMNLyKdW8Lzws
+# rtp402w8EG1/w2Mz9aYzVyHZToBVkkHpthFbENdiDbCGxKYJFgUJtlkRMbh6qcEw
+# bUSa8xO88zB902uX/HIBVaGCAjAwggIsBgkqhkiG9w0BCQYxggIdMIICGQIBATCB
 # hjByMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQL
 # ExB3d3cuZGlnaWNlcnQuY29tMTEwLwYDVQQDEyhEaWdpQ2VydCBTSEEyIEFzc3Vy
 # ZWQgSUQgVGltZXN0YW1waW5nIENBAhANQkrgvjqI/2BAIc4UAPDdMA0GCWCGSAFl
 # AwQCAQUAoGkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUx
-# DxcNMjExMjIwMjM1MTI5WjAvBgkqhkiG9w0BCQQxIgQgzF5DkfxZyicCtlhs8WYZ
-# KVfJrFVZbnfL8ECFv8IBz4EwDQYJKoZIhvcNAQEBBQAEggEAaW0zB9+5s2YYy/uc
-# IeRMlqoZPlt8v28yvMJMMvHvvZAOrstQBm7nw6zuBJRd7ulVW+PcUMtLHlYGKMxO
-# 2BHkxWFNtWuG18UnV77ZTJQv7blr+pu34EhdepQ+z1JNoZO+bf0X8Hq9K5TmtlEe
-# Dmi7b874XMIMx6SERE6vdDRqOQlbz9o6daofegvXQeg4Zyt86DPqYs54zrWpnKQU
-# HD5l445VRawOFogNllf4lFzB9nDqfDcGPoYC8xNnss3+juxXtiTSV9xAVaqIo17q
-# o2YG+wGCwy0qQNsIZ+BCs95za0oxyKAxXrEqA2vT87b2iW+ukGobLBKBuynGq75K
-# 2qshWA==
+# DxcNMjExMjIxMDAyMzI0WjAvBgkqhkiG9w0BCQQxIgQglhw/9M3m5Kd4XoF8NLp1
+# 5YpPCWhfCnVzAmg7duHzL2QwDQYJKoZIhvcNAQEBBQAEggEAeSU9dtNdqWKyBxmW
+# tRZVsStgaJJMt9DygRICv4F1x5E4VRrE9eQm6Qucom6Qv042g70XP2hQEW7zMjNL
+# y9fatn5mE/HvektaDe9zbRPygHrfXToY5+h2rpoTeEv0peqpe4hivJIeBHVxuCS6
+# kx0TeXOHRptI1vC0cUq0kDPGIAqZmegM6N/jPNZNCNt5NIWjOzf+EPUPut29roD7
+# qFzYtn0ckGeaSEu+ho4Kmqkee1rC8XEeLx8ydP/sXArueu04y1a3maYBE5R68hF3
+# +YCzz+obQh/dh+quMNVkVb7v0BdLs6+F272NmGHd35MaLGm6iqwQjg5upG0XTlSn
+# EBTB3Q==
 # SIG # End signature block
