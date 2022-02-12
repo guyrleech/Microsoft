@@ -1,0 +1,20 @@
+
+' Intended to be called by Quick Access Toolbar button when column with date/time imported from csv
+'
+' Save in "Personal Macro Workbook" (%AppData%\Excel\XLSTART\Personal.xlsb) to autoload
+
+' @guyrleech 2022/01/26
+
+Public Sub FormatAsDateTime()
+    Dim myRange As Range
+    Set myRange = Selection
+    myRange.NumberFormat = "dd/mm/yyyy hh:mm:ss.000"
+End Sub
+
+
+Public Sub FormatAsTime()
+    Dim myRange As Range
+    Set myRange = Selection
+    myRange.NumberFormat = "hh:mm:ss.000"
+End Sub
+
