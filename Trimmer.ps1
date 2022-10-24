@@ -7,9 +7,9 @@
 
     Modification History
 
-    10/03/18  GL  Optimised code
+    10/03/18  GL Optimised code
 
-    12/03/18  GL  Added reporting
+    12/03/18  GL Added reporting
 
     16/03/18  GL Fixed bug where -available was being passed as False when not specified
                  Workaround for invocation external to PowerShell for arrays being flattened
@@ -23,7 +23,7 @@
     23/04/18  GL Added exiting from loop if pids specified no longer exist
                  Added -forceIt as equivalent to -confirm:$false for use via scheduled tasks
 
-    12/02/22  GL Added output of whether hard workin set limits and -nogridview
+    12/02/22  GL Added output of whether hard working set limits and -nogridview
 #>
 
 <#
@@ -97,7 +97,7 @@ Produce a report of the current working set usage and limit types for processes 
 
 .PARAMETER OutputFile
 
-Ue with -report to write the results to a csv format file. If the file already exists the operation will fail.
+Use with -report to write the results to a csv format file. If the file already exists the operation will fail.
 
 .PARAMETER ProcessIds
 
@@ -105,7 +105,7 @@ Only trim the specific process ids
 
 .PARAMETER ThisSession
 
-Will only trim working sets of processes in the same session as the sript is running in. The default is to trim in all sessions.
+Will only trim working sets of processes in the same session as the script is running in. The default is to trim in all sessions.
 
 .PARAMETER SessionIds
 
@@ -129,7 +129,7 @@ This will only trim memory in sessions which are disconnected. The default is to
 
 .PARAMETER Idle
 
-If no user input has been received in the last x seconds, whre x is the parameter passed, then the session is considered idle and processes will be trimmed.
+If no user input has been received in the last x seconds, where x is the parameter passed, then the session is considered idle and processes will be trimmed.
 
 .PARAMETER nogridview
 
