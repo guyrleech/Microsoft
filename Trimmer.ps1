@@ -240,7 +240,7 @@ Param
     [string]$taskFolder = '\MemoryTrimming' 
 )
 
-[int]$minimumIdlePeriod = 120 ## where minimum reptition of a scheduled task must be at least 1 minute, thus idle time must be at least double that (https://msdn.microsoft.com/en-us/library/windows/desktop/aa382993(v=vs.85).aspx)
+[int]$minimumIdlePeriod = 120 ## where minimum repetition of a scheduled task must be at least 1 minute, thus idle time must be at least double that (https://msdn.microsoft.com/en-us/library/windows/desktop/aa382993(v=vs.85).aspx)
 
 ## Borrowed from http://stackoverflow.com/a/15846912 and adapted
 Add-Type @'
