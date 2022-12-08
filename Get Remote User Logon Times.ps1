@@ -1,13 +1,8 @@
-﻿<#
-    Get remote logon times via WMI
-
-    @guyrleech (c) 2018
-#>
-
+﻿
 <#
 .SYNOPSIS
 
-Use WMI to query computers to find out, since boot, when any remote desktop connections logged on
+Use WMI to query computers to find out, since boot, when any interactive desktop connections logged on
 
 .PARAMETER computers
 
@@ -40,36 +35,83 @@ Show all remote desktop logons for user guy.leech on computers computer01 and co
 .NOTES
 
 Pipe the output through cmdlets like Out-GridView, Export-CSV or Format-Table
+
+Modification History:
+
+    2018/08/14  @guyrleech  Initial Release
+    2022/12/08  @guyrleech  Fixed flattening of array bug
+
 #>
 
 [CmdletBinding()]
 
 Param
 (
-    [string[]]$computers = @( $env:COMPUTERNAME ) ,
-    [string]$user ,
+    [string]$user = $env:USERNAME ,
+    [string]$shellProcess = 'Explorer' ,
     [datetime]$after ,
-    [datetime]$before
+    [datetime]$before ,
+    [int]$sessionid = ( Get-Process -Id $pid | select -ExpandProperty SessionId ) ,
+    [switch]$noPrompt
 )
+
+$timeNow = [datetime]::Now
 
 $culture = Get-Culture
 [string]$preciseTimeFormat = '{0}.FFFFFFF' -f $culture.DateTimeFormat.SortableDateTimePattern 
 
-ForEach( $computer in $computers )
+$logons = @( Get-WmiObject win32_logonsession  | ForEach-Object `
 {
-    Get-WmiObject win32_logonsession -ComputerName $computer -Filter "LogonType='10'" | ForEach-Object `
+    $session = $_
+    Get-WmiObject win32_loggedonuser -filter "Dependent = '\\\\.\\root\\cimv2:Win32_LogonSession.LogonId=`"$($session.logonid)`"'" | ForEach-Object `
     {
-        $session = $_
-        Get-WmiObject win32_loggedonuser -ComputerName $computer -filter "Dependent = '\\\\.\\root\\cimv2:Win32_LogonSession.LogonId=`"$($session.logonid)`"'" | ForEach-Object `
+        [datetime]$logonTime = (([WMI] '').ConvertToDateTime( $session.StartTime ))
+        if( ( ! $PSBoundParameters[ 'after'] -or $logonTime -ge $after ) `
+            -and ( ! $PSBoundParameters[ 'before' ] -or $logonTime -le $before ) `
+                -and $_.Antecedent -match 'Domain="(.*)",Name="(.*)"$' `
+                    -and ( [string]::IsNullOrEmpty( $user ) -or ( $matches -and $matches.Count -eq 3 -and $user -eq $matches[2] ) ) )
         {
-            [datetime]$logonTime = (([WMI] '').ConvertToDateTime( $session.StartTime ))
-            if( ( ! $PSBoundParameters[ 'after'] -or $logonTime -ge $after ) `
-                -and ( ! $PSBoundParameters[ 'before' ] -or $logonTime -le $before ) `
-                    -and $_.Antecedent -match 'Domain="(.*)",Name="(.*)"$' `
-                        -and ( [string]::IsNullOrEmpty( $user ) -or ( $matches -and $matches.Count -eq 3 -and $user -eq $matches[2] ) ) )
-            {
-                [pscustomobject]@{ 'Computer' = $computer ; 'User' = ($matches[1] + '\' + $matches[2] ) ; 'Logon Time' = $logonTime ; 'Logon Time Precise' = (Get-Date $logonTime -Format $preciseTimeFormat ) ;'Authentication Package' = $session.AuthenticationPackage }
-            }
+            [pscustomobject]@{ 'User' = $Matches[1] + '\' + $Matches[2] ; 'Logon Time' = $logonTime ; 'Logon Id' = $session.LogonId ; 'Logon Type' = $session.LogonType ; 'Logon Time Precise' = (Get-Date $logonTime -Format $preciseTimeFormat ) ;'Authentication Package' = $session.AuthenticationPackage }
         }
     }
+} | Sort-Object -Property 'Logon Time' -Descending )
+
+$logons | Format-Table -AutoSize
+
+if( $logons -and $logons.Count )
+{
+    if( ! [string]::IsNullOrEmpty( $shellProcess ) )
+    {
+        [array]$processes = @( Get-Process -Name $shellprocess -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionid } )
+        if( ! $processes -or ! $processes.Count )
+        {
+            Write-Warning "Found no instances of process $shellProcess for session $sessionid"
+        }
+        else
+        {
+            [array]$shells = @( ForEach( $process in $processes )
+            {
+                [pscustomobject]@{ 'Started' = $process.StartTime ; 'Seconds after logon' = (New-TimeSpan -End $process.StartTime -Start $logons[0].'Logon Time').TotalSeconds ; 'Seconds to now' = (New-TimeSpan -End $timeNow -Start $process.StartTime).TotalSeconds }
+            })
+        }
+
+        "$((New-TimeSpan -End $timeNow -Start $logons[0].'Logon Time').TotalSeconds ) seconds elapsed from logon to now on $env:COMPUTERNAME for $user"
+
+        $logons[0] | Format-Table -AutoSize
+
+        "$shellProcess instances for session $sessionid"
+
+        $shells | Format-Table -AutoSize
+    }
+
+    quser $user
+}
+else
+{
+    Write-Warning "No logons found for $user in session $sessionid"
+}
+
+if( ! $noPrompt )
+{
+    $null = Read-Host 'Hit enter to exit'
 }
