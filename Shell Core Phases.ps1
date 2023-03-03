@@ -13,7 +13,10 @@
 
 .PARAMETER mostRecent
     Only show the most recent instance of the logon task for the user
-    
+
+.PARAMETER winlogon
+    Process winlogon subscriber notification events instead
+     
 .EXAMPLE
     & '.\Shell Core Phases.ps1' -days 7 -mostRecent
 
@@ -24,10 +27,16 @@
 
     Show the most recent "PreShellTasks" shell phase duration only for user fred for the last 1 days
 
+.EXAMPLE
+    & '.\Shell Core Phases.ps1' -days 7 -winlogon
+
+    Show tall winlogon subscriber notification events for all users for the last 7 days
+    
 .NOTES
     Modification History:
 
     2023/03/03 @guyrleech  Initial Version
+                           Added winlogon subscriber notiication events
 #>
 
 [CmdletBinding()]
@@ -37,12 +46,24 @@ Param
     [decimal]$daysBack = 1 ,
     [string]$user ,
     [string]$task ,
+    [switch]$winlogon ,
     [switch]$mostRecent
 )
 
 [int]$counter = 0
 
-Get-WinEvent -ErrorAction SilentlyContinue -Verbose:$false -FilterHashtable @{ ProviderName = 'Microsoft-Windows-Shell-Core' ; id = 62170,62171 ; StartTime = [datetime]::Now.AddDays( -$daysBack )} -Oldest | Select *,@{n='LogonTask';e={$_.Properties[1].Value}},@{n='TaskState';e={if( $_.Id -eq 62170 ) { 'Start' } else { 'Finish' }}}|select timecreated,id,logontask,Taskstate,message,userid|Group-Object -Property userid | ForEach-Object `
+[int[]]$events = @( 62170,62171 )
+[string[]]$provider = 'Microsoft-Windows-Shell-Core' 
+[string]$eventName = 'LogonTask'
+
+if( $winlogon )
+{
+    $provider = 'Microsoft-Windows-Winlogon'
+    $events = @( 811, 812)
+    $eventName = 'SubScriberName'
+}
+
+Get-WinEvent -ErrorAction SilentlyContinue -Verbose:$false -FilterHashtable @{ ProviderName = $provider ; id = $events; StartTime = [datetime]::Now.AddDays( -$daysBack )} -Oldest | Select *,@{n='LogonTask';e={$_.Properties[1].Value}},@{n='TaskState';e={if( $_.Id -eq 62170 ) { 'Start' } else { 'Finish' }}}|select timecreated,id,logontask,Taskstate,message,userid|Group-Object -Property userid | ForEach-Object `
 {
     $eventsForUser = $_
     $counter++
@@ -59,7 +80,7 @@ Get-WinEvent -ErrorAction SilentlyContinue -Verbose:$false -FilterHashtable @{ P
                 if( $eventsForTask.Group[$index].LogonTask -match $task )
                 {
                     [pscustomobject]@{
-                        LogonTask = $eventsForTask.Group[$index].LogonTask
+                        $eventName = $eventsForTask.Group[$index].LogonTask
                         UserName = $username
                         Start = $eventsForTask.Group[$index].TimeCreated
                         End = $(if( $index -lt $eventsForTask.Group.Count -1 ) { $eventsForTask.Group[$index + 1].TimeCreated })
