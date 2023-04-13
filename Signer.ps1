@@ -11,6 +11,7 @@
     Modification History:
 
     2023/02/18  @guyrleech  Initial Release
+    2023/04/13  @guyrleech  Fixed messagebox bug
 #>
 
 
@@ -27,8 +28,8 @@ if( $args -and $args.Count )
 
     if( $null -eq $signingCertificate )
     {
-        Add-Type -AssemblyName System.Windows.Forms
-        [void][Windows.MessageBox]::Show( 'No valid code signing certificate found' , 'Signing Error', 'Ok' , 'Error' )
+        Add-Type -AssemblyName Microsoft.VisualBasic
+        $null = [Microsoft.VisualBasic.Interaction]::MsgBox( 'No valid code signing certificate found' , 'SystemModal,Critical,OkOnly' , 'Signing Error' )
         Throw "No valid code signing certificate found"
     }
     if( $signingCertificate -is [array] -and $signingCertificate.Count -gt 1 )
@@ -47,7 +48,8 @@ if( $args -and $args.Count )
         $signing = Set-AuthenticodeSignature -Certificate $signingCertificate -FilePath $file -TimestampServer $timeStampServer
         if( -not $signing -or -Not $? )
         {
-            [void][Windows.MessageBox]::Show( "Error signing $file`n$($Error[0])" , 'Signing Error', 'Ok' , 'Error' )
+            Add-Type -AssemblyName Microsoft.VisualBasic
+            $null = [Microsoft.VisualBasic.Interaction]::MsgBox( "Error signing $file`n$($Error[0])" , 'SystemModal,Critical,OkOnly' , 'Signing Error' )
         }
     }
 }
@@ -55,8 +57,8 @@ if( $args -and $args.Count )
 # SIG # Begin signature block
 # MIIjcAYJKoZIhvcNAQcCoIIjYTCCI10CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUhuPxLiggD2o+V2Wd8thP/d5+
-# QXiggh2OMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU0yNCUkG6g/m3A0wMYLCmg+Ji
+# /rCggh2OMIIFMDCCBBigAwIBAgIQBAkYG1/Vu2Z1U0O1b5VQCDANBgkqhkiG9w0B
 # AQsFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMTMxMDIyMTIwMDAwWhcNMjgxMDIyMTIwMDAwWjByMQsw
@@ -219,28 +221,28 @@ if( $args -and $args.Count )
 # cmVkIElEIENvZGUgU2lnbmluZyBDQQIQBP3jqtvdtaueQfTZ1SF1TjAJBgUrDgMC
 # GgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYK
 # KwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG
-# 9w0BCQQxFgQUc6E2eK3TAMmcj1HQlAH4qdHLG3cwDQYJKoZIhvcNAQEBBQAEggEA
-# Xb6t4XDPIo41AjlYGVaF6j2cPkkc1EgFh/KA4HrbF4QuzWih4zos+OcqYRMqnY4H
-# LUmBiqxXRsr4ff3UzCdfDOdFT7/3iBN7GcsmOSOMUDoacIOJWnjNDyJh6RzRmlHR
-# 3TvBw9GQi0mjhrnhqjG2FCaKKIhCfiTOsOZbsh7fjp7cL1GfYBIb0zpRH0WaAc01
-# 5lT59wqk7eSCmVYLXNueo/S8QvFFLOSVyl3OcehjplZ+e6EuR70x8idmq/Eo+zhi
-# mZK6QifV7R3ChKfNrsR03h3wAyu8BQgCNH/xtwH4D0OAR3/J96WAGOiX2ExyzChq
-# EoWip0oiQj/Ltdr1iyzC9aGCAyAwggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3
+# 9w0BCQQxFgQUhRQvORcLu8kikL9CF1XsmcUNA1YwDQYJKoZIhvcNAQEBBQAEggEA
+# XnlG66cG1pQ/e7jLKpeTj+S8pPSPLWsfVcv0ba1Q2wlyTzywdJrnllNZH7GNGYyj
+# 7ml8Bk6gtPov3dopqXcJTVuZq3nSkSnFdz5kOJMt68DFOxWck0J1bTjp0S81UC1o
+# tv5Klwn79Ow0r1wP+pdX/+jQrTNEoV0NBf56pysiaQL7IjLYQPyKxSjEomlwWZ4F
+# 5aeMIVthXfUilUUVuMdq2kimBR9Mk0Od/JypWwGTBpVYCQVwrJ8Wbvd/dHckudmb
+# QFnONEabDn/Pf0NKfprrRDQsrel3COToXmJWyQLnUavr/4ZbnPBgLppGY8v8ttkV
+# DD41Aimi0vPKy6gHtM4ioKGCAyAwggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3
 # MGMxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UE
 # AxMyRGlnaUNlcnQgVHJ1c3RlZCBHNCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBp
 # bmcgQ0ECEAxNaXJLlPo8Kko9KQeAPVowDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG
-# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yMzAyMTgxOTU3MzBa
-# MC8GCSqGSIb3DQEJBDEiBCD9ijwx2kI9jX7vHABvvoZmzBec5a2DHD/xPCk1iMEB
-# JjANBgkqhkiG9w0BAQEFAASCAgB6ke4aH9pBsULzmeW3gHvFiNaNbGnqbKd8dW9l
-# pK0VpJOJ49rC9bzNh6IOzmLGnvZsd8s+J2u5nMYifc30Z33rbwxNyocmYZVDh7RL
-# ZLs8Q0dwMF0D+x+uyQs040A7XN7v+WfQNRqLMqgsyATfgKM4hAyt7hxeg8GoGc1M
-# Bnhxx/hkVY5IW4iDkFSoaZhpkX7/1krNTyRfQvPQ+FwZzWviI3CPwaMyrpXxseVz
-# UUT9aOpZWqVxYKDNBhqT+2rShcpYEF+gKidMi5U3rWRTlYWSNtRFACGmiNwwMsxD
-# F97gs/X7vKXeXJ8vjqwaEbNkECjbUbDGwqQWO7yFNG7hwk98m+dilPDl2v2ePUgI
-# PbVDy1FHHC3OoohUP3Nzg6m2PqLtBuxFQoFdHuWaqUCqWYbDHuSogMpyXHdfaERc
-# SAgcqRSwFLbiujGqKDwHNgPculoq46f36NL0Am+I45mm6376fVWsgYB16/pwGcUW
-# KJRyIQMHEp3zcGCkE5FFy401VVNK9KgsvxnJZCMQeukpcFPNUpocW2btFo9fAO1G
-# fAPhcAoBRr15zKW7LeRxGdmuWHnxI5PhuOJ49NaLmZ8rSJ9DhQBFvrHdTRlqF1xk
-# O/N9XKyMX+siZhpw1C8k8JcNEHNKGPnf6i4iv7dpJO+zhnXbJkWuFTSLmPtbrTNs
-# K6WW8Q==
+# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yMzA0MTMyMTQ4NTZa
+# MC8GCSqGSIb3DQEJBDEiBCDqR8x7kcqyLCSDqBd8LMGqooLKTkWkqRwSfWCSD0he
+# aTANBgkqhkiG9w0BAQEFAASCAgCbQa3wqqVYE/J/tfSLj0q5IPktLdn9iye36F4o
+# 8Up2HGoLTMdKIkKLhEmjWRVv2rTbFly7egIPQ2CxNTei96Ppz/qfLgDINTCkJp4D
+# Qonxd/n1GDtW/PxcTWj+aUx4uJ0QeAc9VeRK0ROP8jWg9gHHsdcL5zgC6uhRl28n
+# Srqy4GdrXLyks0hcJzktS9cV3SvW1qrnT/Y1FlAEEqTkQUzgjqcdsYBZCeZBthI6
+# 0z4ZqrOaxp5MyP8UhFD8HiHumk/i2SAj861V2c9vtB69vVkcZT6xri99mNgTGnD3
+# 3KCd6NPWRw6eBrcwZv6yzUfZTyCZOTVWWIB+PAlPZJMg9zjAJqphVxH8fV6yr+Mo
+# qJsMB7pdDimPCGnLnEJmetc6GcFrFOOVNPGV9NV7F+ygstPCw7Q7ExX9IOqnNv60
+# hVsWsJ1h2CWeJgqQLsvFW+6mRRhLXzNjuty1yKV53EenAHBSk1x6HTAQrMU3iG4e
+# SBVjsDRK2RJ5HqiNO3qKe6rIY2eqDbVWwoVyWzrlm19CcGCAIIMUN/Vs6Krp6nRF
+# bvVsv0RuBL7L2qZ9Lj9CodxM7/ao8W9dkFGnNQC3B46mznmq+eXmUDEwWAueDzJO
+# XGI5fLsjVRv/CaIW+kvib2SV72swoov5E4hbDM0jt0wPiGs+8yraLznad+FUW2U5
+# xExGqg==
 # SIG # End signature block
