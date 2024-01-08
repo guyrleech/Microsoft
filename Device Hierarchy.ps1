@@ -32,6 +32,7 @@
     Modification History:
 
     2023/12/28  @guyrleech  Script born
+    2024/01/08  @guyrleech  Added PDO property to default output
 #>
 
 <#
@@ -53,11 +54,16 @@ Param
     [Parameter(Mandatory=$true,HelpMessage='Regex to match the device to enumerate parents')]
     [string]$deviceRegex ,
     [switch]$recurse ,
-    [array]$properties = @( @{n='IndentedName';e={ "{0}{1}" -f ( ' ' * ($lowestLevel + $_.HierarchyLevel)), $_.FriendlyName }},'HierarchyLevel','DeviceId','Present','Device_DriverDate','Device_DriverProvider','Device_DriverVersion','Device_DriverInfSection','Device_DriverInfPath','Device_LocationInfo' ) ,
+    [array]$properties = @(
+        @{n='IndentedName';e={ "{0}{1}" -f ( ' ' * ($lowestLevel + $_.HierarchyLevel)), $_.FriendlyName }},
+            @{n='PhysicalDeviceObject' ; e={ $_.Device_PDOName }} ,
+                'HierarchyLevel','DeviceId','Present','Device_DriverDate','Device_DriverProvider','Device_DriverVersion','Device_DriverInfSection','Device_DriverInfPath','Device_LocationInfo' ) ,
     [string]$replace = 'DEVPKEY_' ,
     [string]$with = '' ,
     [int]$level = 1
 )
+
+## TODO cross reference to device names  gcim Win32_PnPSignedDriver -Filter "PDO like '\\Device\\USBPDO%'" |select DeviceName,DeviceID,PDO,DriverDate,DriverVersion,InfName
 
 #region Functions
 Function Add-DeviceProperties
