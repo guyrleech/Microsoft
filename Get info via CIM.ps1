@@ -49,6 +49,10 @@ The authentication method to use to establish the CIM session
 
 Override the default connections/query timeout (in seconds)
 
+.PARAMETER delimiter
+
+Delimiter used in class names to spearate an optional namespace from the class name
+
 .PARAMETER classes
 
 A comma separated list of CIM classes to query
@@ -83,13 +87,15 @@ Modification History:
 
 11/03/20  @guyrleech  Initial public release
 31/03/20  @guyrleech  Added CIM_LogicalDevice and CIM_System to common
-28/03/24  @guyrleech  Added PnP classes to common
+28/03/24  @guyrleech  Added PnP classes to common. Added support for different namespaces in common & added SecurityCenter(2) classes to common
 #>
 
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'common')]
 
 Param
 (
+    [Parameter(ParameterSetName='common')]
+    [switch]$common ,
     [System.Collections.Generic.List[string]]$computers ,
     [string]$computersFile ,
     [string]$outputFolder = $env:TEMP ,
@@ -97,14 +103,13 @@ Param
     [string]$includeClasses ,
     [string]$namespace,
     [switch]$overwrite ,
-    [Parameter(ParameterSetName='common')]
-    [switch]$common ,
     [System.Management.Automation.PSCredential]$credential ,
     [ValidateSet('Basic','CredSsp','Default','Digest','Kerberos','Negotiate','NtlmDomain')]
     [string]$authentication ,
     [int]$timeout , ## seconds
     [Parameter(ParameterSetName='classes')]
     [string[]]$classes ,
+    [string]$delimiter = ':' ,
     [AllowNull()]
     [AllowEmptyString()]
     [string]$expandArrays = ','
@@ -112,7 +117,13 @@ Param
 
 if( $common )
 {
-    $classes = @( 
+    $classes = @(
+        'root/SecurityCenter:AntiVirusProduct'
+        'root/SecurityCenter:AntiSpywareProduct'
+        'root/SecurityCenter:FirewallProduct'
+        'root/SecurityCenter2:AntiVirusProduct'
+        'root/SecurityCenter2:AntiSpywareProduct'
+        'root/SecurityCenter2:FirewallProduct'
         'Win32_ComputerSystemProduct' , 
         'Win32_ComputerSystem' , 
         'win32_operatingsystem' , 
@@ -208,14 +219,14 @@ if( $PSBoundParameters[ 'timeout' ] )
     $cimArguments.Add( 'OperationTimeoutSec' , $timeout )
 }
 
-if( ! $PSBoundParameters[ 'classes' ] -and ! $common )
+if( -Not $PSBoundParameters[ 'classes' ] -and -Not $common )
 {
     [hashtable]$classArguments = @{}
     if( $PSBoundParameters[ 'namespace' ] )
     {
         $classArguments.Add( 'namespace' , $namespace )
     }
-    $classes = @( Get-CimClass @classArguments ' , ' Where-Object { ( ! $PSBoundParameters[ 'includeClasses' ] -or $_.CimClassName -match $includeClasses ) -and $_.CimClassName -NotMatch $excludeClasses } ' , ' Select-Object -ExpandProperty CimClassName ' , ' Sort-Object )
+    $classes = @( Get-CimClass @classArguments | Where-Object { ( -Not $PSBoundParameters[ 'includeClasses' ] -or $_.CimClassName -match $includeClasses ) -and $_.CimClassName -NotMatch $excludeClasses } | Select-Object -ExpandProperty CimClassName | Sort-Object )
 }
 
 [int]$counter = 0
@@ -268,15 +279,25 @@ ForEach( $class in $classes )
     {
         Write-Verbose "$counter / $($classes.Count) : $class"
         
-        [string]$outputFile = (Join-Path -Path $outputFolder -ChildPath "$class.csv")
+        [string]$outputFile = (Join-Path -Path $outputFolder -ChildPath "$($class -replace '[/\\:]' , '_').csv" )
         if( $overWrite  `
-            -or ! ( Test-Path -Path $outputFile -PathType Leaf -ErrorAction SilentlyContinue ) `
-            -or ! ( Get-ItemProperty -Path $outputFile | Select -ExpandProperty Length ))
+            -or -Not ( Test-Path -Path $outputFile -PathType Leaf -ErrorAction SilentlyContinue ) `
+            -or -Not ( Get-ItemProperty -Path $outputFile | Select -ExpandProperty Length ))
         {
-            [array]$results = @( Get-CimInstance @cimArguments -ClassName $class | Select-Object -Property PSComputerName,* -ExcludeProperty PSShowComputerName,CIM?* -ErrorAction SilentlyContinue )
+            [hashtable]$differentNamespace = @{}
+            [string[]]$nameSpaceAndClass = $class -split $delimiter , 2 ## only split on 1st delimiter
+            if( $nameSpaceAndClass -is [array] -and $nameSpaceAndClass.Count -gt 1 )
+            {
+                if( $nameSpaceAndClass[ 0 ] -ine $namespace )
+                {
+                    $differentNamespace.Add( 'Namespace' , $nameSpaceAndClass[ 0 ] )
+                }
+                $class = $nameSpaceAndClass[ 1 ]
+            }
+            [array]$results = @( Get-CimInstance @cimArguments -ClassName $class @differentNamespace | Select-Object -Property PSComputerName,* -ExcludeProperty PSShowComputerName,CIM?* -ErrorAction SilentlyContinue )
             if( $results -and $results.Count )
             {
-                if( ! [string]::IsNullOrEmpty( $expandArrays ) )
+                if( -Not [string]::IsNullOrEmpty( $expandArrays ) )
                 {
                     ForEach( $result in $results )
                     {
