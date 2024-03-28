@@ -82,7 +82,8 @@ To show all available CIM classes, run Get-CIMClass -ClassName *
 Modification History:
 
 11/03/20  @guyrleech  Initial public release
-
+31/03/20  @guyrleech  Added CIM_LogicalDevice and CIM_System to common
+28/03/24  @guyrleech  Added PnP classes to common
 #>
 
 [CmdletBinding()]
@@ -158,7 +159,12 @@ if( $common )
         'Win32_Printer' ,
         'Win32_Processor' ,
         'Win32_ProtocolBinding' ,
-        'win32_memorydevice' )
+        'win32_memorydevice' ,
+        'CIM_LogicalDevice' ,
+        'Win32_PnPEntity' ,
+        'Win32_PnPSignedDriver' ,
+        'Win32_PnPDevice' ,
+        'CIM_System' )
 }
 
 ## stop duplicate computers in the text file
@@ -214,12 +220,15 @@ if( ! $PSBoundParameters[ 'classes' ] -and ! $common )
 
 [int]$counter = 0
 
-if( ! ( Test-Path -Path $outputFolder -ErrorAction SilentlyContinue -PathType Container ) )
+if( -Not ( Test-Path -Path $outputFolder -ErrorAction SilentlyContinue -PathType Container ) )
 {
-    [void]( New-Item -Path $outputFolder -Force -ItemType Directory )
+    if( -Not ( New-Item -Path $outputFolder -Force -ItemType Directory ) )
+    {
+        Throw "Failed to create output folder $outputFolder"
+    }
 }
 
-[hashtable]$CIMSessionParameters = @{}
+[hashtable]$CIMSessionParameters = @{ 'Verbose' = $false }
 if( $computers -and $computers.Count )
 {
     $CIMSessionParameters.Add( 'ComputerName' , $computers )
@@ -240,21 +249,22 @@ if( $PSBoundParameters[ 'authentication' ] )
     $cimArguments.Add( 'authentication' , $authentication )
 }
 
+$CIMsession = $null
 $CIMsession = New-CimSession @CIMSessionParameters
 
-if( ! $CIMsession )
+if( $null -eq $CIMsession )
 {
     Throw "Failed to create CIM session to $($computers -join ',')"
 }
 
 $cimArguments.Add( 'CIMSession' , $CIMsession )
 
-Write-Verbose "Calling $($classes.Count) CIM methods for $($computers.Count) machines and writing results to `"$outputFolder`""
+Write-Verbose "Querying $($classes.Count) CIM classes for $($computers.Count) machines and writing results to `"$outputFolder`""
 
 ForEach( $class in $classes )
 {
     $counter++
-    if( ! $PSBoundParameters[ 'IncludeClasses' ] -or $class -match $includeClasses )
+    if( -Not $PSBoundParameters[ 'IncludeClasses' ] -or $class -match $includeClasses )
     {
         Write-Verbose "$counter / $($classes.Count) : $class"
         
@@ -288,7 +298,7 @@ ForEach( $class in $classes )
         }
         else
         {
-            Write-Verbose "File `"$outputFile`" already exists so not redoing"
+            Write-Warning "File `"$outputFile`" already exists so not overwriting"
         }
     }
 }
