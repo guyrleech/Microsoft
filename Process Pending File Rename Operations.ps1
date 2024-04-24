@@ -24,7 +24,8 @@
     Modification History:
 
     @guyrleech  2021/05/11  Script born
-    @guyrleech  2024/04/24  Warning if -ShowUsage used as not yet implemented. Only take file copy if not a directory. Fixed issue with internal copy of file with -whatif
+    @guyrleech  2024/04/24  Warning if -ShowUsage used as not yet implemented. Only take file copy if not a directory. Fixed issue with internal copy of file with -whatif.
+                            Removed "usage" output properties. Check if number of entries in value is odd and report/abort if so
 #>
 
 <#
@@ -73,6 +74,19 @@ if( $null -eq $pendingFileRenameOperations -or ! $pendingFileRenameOperations.Co
 }
 
 Write-Verbose -Message "Got $($pendingFileRenameOperations.Count) total entries"
+
+if( $pendingFileRenameOperations.Count -band 0x1 )
+{
+    [string]$message = "Count of values in pendingFileRenameOperations is $($pendingFileRenameOperations.Count) which is odd but should be even" 
+    if( $processEntries -or $pendingFileRenameOperations.Count -lt 2 )
+    {
+        Throw $message
+    }
+    else
+    {
+        Write-Warning -Message $message
+    }
+}
 
 ## get all loaded modules from all processes including the opposite bitness of this PowerShell process
 
@@ -167,7 +181,7 @@ For( [int]$index = 0 ; $index -lt $pendingFileRenameOperations.Count ; $index +=
     $destinationUsage = $null
 
     [string]$destinationFile = $pendingFileRenameOperations[ $index + 1 ] -replace '^!?\\\?\?\\'
-    if( ! $deletion -and ( $destinationDetails = Get-ItemProperty -Path $destinationFile -ErrorAction SilentlyContinue -ErrorVariable errorVariabubble ) )
+    if( -Not $deletion -and ( $destinationDetails = Get-ItemProperty -Path $destinationFile -ErrorAction SilentlyContinue -ErrorVariable errorVariabubble ) )
     {
         $destinationVersionInfo = $destinationDetails | Select -ExpandProperty VersionInfo -ErrorAction SilentlyContinue
         ## TODO if doesn't exist then we must report this
@@ -181,10 +195,10 @@ For( [int]$index = 0 ; $index -lt $pendingFileRenameOperations.Count ; $index +=
     $result = [PSCustomObject]@{
         'Source' = $sourceFile
         'SourceExtension' = [System.IO.Path]::GetExtension( $pendingFileRenameOperations[ $index ] )
-        'SourceUsage' = $sourceUsage
+ ##       'SourceUsage' = $sourceUsage
         'Destination' = $destinationFile
         'DestinationExtension' = $(if( ! [string]::IsNullOrEmpty( $pendingFileRenameOperations[ $index + 1 ] ) ) { [System.IO.Path]::GetExtension( $pendingFileRenameOperations[ $index + 1 ] ) })
-        'DestinationUsage' = $destinationUsage
+ ##       'DestinationUsage' = $destinationUsage
         'Destination Size (KB)' = $(if( $destinationDetails ) { [math]::round( $destinationDetails.Length / 1KB , 1 ) })
         'Deletion' = $deletion
         'Deleted' = $false
