@@ -55,7 +55,7 @@
     Do not install the generated certificate, the file containing it will be output to the pipeline
   
 .EXAMPLE
-    & . '.\CertGen.ps1' -website 'Default Web Site','Support' -computerName '*.guyrleech.local' -friendlyName 'Wild Thing'
+    & . '.\CertGen.ps1' -website 'Default Web Site','Support' -computerName '*.guyrleech.local' -friendlyName 'Wild Thing' -confirm:$false
 
     Create and install a wildcard certificate for the guyrleech.local domain & friendly name of "Wild Thing" & set it for the https binding on the support & default web sites
    
@@ -65,6 +65,19 @@
     Modification History:
 
     2024/05/09  @guyrleech  Script born out of frustration that IIS mgmt doesn't do SANs !
+#>
+
+
+<#
+Copyright © 2024 Guy Leech
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, 
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #>
 
 [CmdletBinding(SupportsShouldProcess=$true,ConfirmImpact='High')]
@@ -130,7 +143,7 @@ $certificateFile           = Join-Path -Path $env:temp -ChildPath "$randomishBas
 
 $template | Out-File -FilePath $certificateTemplateFile
 
-if( -Not $? -or -Not (Test-Path -Path $certificateTemplateFile -PathType Leaf ))
+if( -Not $WhatIfPreference -and ( -Not $? -or -Not (Test-Path -Path $certificateTemplateFile -PathType Leaf )) )
 {
     Throw "Failed to write template to $certificateTemplateFile"
 }
@@ -191,35 +204,41 @@ if( -Not ( Test-Path -Path $certificateFile -PathType Leaf ) )
 if( -Not $noInstall )
 {
     $newCertificate = $null
-    $newCertificate = Import-Certificate -FilePath $certificateFile -CertStoreLocation $certificateLocation
-    if( $null -eq $newCertificate )
+    if( $PSCmdlet.ShouldProcess( $certificateLocation , "Install certificate file" ) )
     {
-        Throw "Failed to import certificate from file $certificateFile to store $certificateLocation"
-    }
-    if( -Not $noDeleteCertificateFile )
-    {
-        Remove-Item -Path $certificateFile -Force
-    }
-    $newCertificate ## output
-
-    if( $null -ne $webSite -and $webSite.Count -gt 0 )
-    {
-        Import-Module -Name IISAdministration -Verbose:$false -Debug:$false
-        ForEach( $site in $webSite )
+        $newCertificate = Import-Certificate -FilePath $certificateFile -CertStoreLocation $certificateLocation
+        if( $null -eq $newCertificate )
         {
-            $binding = $null
-            $binding = Get-WebBinding -Name $site -Protocol $protocol
-            if( $null -ne $binding )
+            Throw "Failed to import certificate from file $certificateFile to store $certificateLocation"
+        }
+        if( -Not $noDeleteCertificateFile )
+        {
+            Remove-Item -Path $certificateFile -Force
+        }
+        $newCertificate ## output
+
+        if( $null -ne $webSite -and $webSite.Count -gt 0 )
+        {
+            Import-Module -Name IISAdministration -Verbose:$false -Debug:$false
+            ForEach( $site in $webSite )
             {
-                $binding.RebindSslCertificate( $newCertificate.Thumbprint , (Split-Path -Path $certificateLocation -Leaf) )
-                if( -Not $? )
+                $binding = $null
+                $binding = Get-WebBinding -Name $site -Protocol $protocol
+                if( $null -ne $binding )
                 {
-                    Write-Warning -Message "Problem binding new certificate to binding for web site `"$site`""
+                    if( $PSCmdlet.ShouldProcess( "Thumbprint $($newCertificate.Thumbprint)" , "Apply to $protocol binding on web site `"$site`"" ))
+                    {
+                        $binding.RebindSslCertificate( $newCertificate.Thumbprint , (Split-Path -Path $certificateLocation -Leaf) )
+                        if( -Not $? )
+                        {
+                            Write-Warning -Message "Problem binding new certificate to binding for web site `"$site`""
+                        }
+                    }
                 }
-            }
-            else
-            {
-                Write-Warning -Message "Failed to get binding for protocol $protocol for web site `"$site`""
+                else
+                {
+                    Write-Warning -Message "Failed to get binding for protocol $protocol for web site `"$site`""
+                }
             }
         }
     }
