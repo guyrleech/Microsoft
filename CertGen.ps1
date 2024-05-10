@@ -65,7 +65,8 @@
     Modification History:
 
     2024/05/09  @guyrleech  Script born out of frustration that IIS mgmt doesn't do SANs !
-    2024/09/10  @guyrleech  Removed DNS=127.0.0.1 as recommended by @ronin3510
+    2024/09/10  @guyrleech  Removed DNS=127.0.0.1 as recommended by @ronin3510.
+                            Change to regex used on certutil as quoting different on Win 11 compared with Server 2016
 #>
 
 
@@ -173,11 +174,12 @@ if( -Not $? )
     ## TODO probably should make it an optional parameter in case certutil gives us the wrong one
     if( Select-String -inputobject $result -SimpleMatch 'No Certification Authorities available' )
     {
-        $configMatch = certutil.exe | Select-String -Pattern '^\s*Config:\s*`?(.+)''?$'
+        Write-Verbose -Message "Trying to get root CA via certutil as got error: $result"
+        $configMatch = certutil.exe | Select-String -Pattern '^\s*Config:\s*[`"]?(.+)["'']?$'
         if( $null -ne $configMatch )
         {
             $rootCA = $null
-            $rootCA = $configMatch.Matches.groups[1].value -replace "'"
+            $rootCA = $configMatch.Matches.groups[1].value -replace "[`"']"
             if( $null -ne $rootCA )
             {
                 Write-Verbose -Message "Submitting certificate request to root CA $rootCA"
@@ -191,6 +193,10 @@ if( -Not $? )
             {
                 Throw "Failed to find Root CA in certutil output"
             }
+        }
+        else
+        {
+            Write-Warning -Message "Failed to parse CA (via Config: line) from certutil.exe output"
         }
     }
     else
