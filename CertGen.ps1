@@ -65,6 +65,7 @@
     Modification History:
 
     2024/05/09  @guyrleech  Script born out of frustration that IIS mgmt doesn't do SANs !
+    2024/09/10  @guyrleech  Removed DNS=127.0.0.1 as recommended by @ronin3510
 #>
 
 
@@ -130,9 +131,11 @@ szOID_ENHANCED_KEY_USAGE = "2.5.29.37"
 szOID_PKIX_KP_SERVER_AUTH = "1.3.6.1.5.5.7.3.1" 
 szOID_PKIX_KP_CLIENT_AUTH = "1.3.6.1.5.5.7.3.2" 
 [Extensions] 
-%szOID_SUBJECT_ALT_NAME2% = "{text}dns=$computername&dns=127.0.0.1" 
+%szOID_SUBJECT_ALT_NAME2% = "{text}dns=$computername&IPAddress=127.0.0.1&DNS=localhost" 
 %szOID_ENHANCED_KEY_USAGE% = "{text}%szOID_PKIX_KP_SERVER_AUTH%,%szOID_PKIX_KP_CLIENT_AUTH%" 
 "@
+
+## TODO Needs to be IPAddress = 127.0.0.1 or you can use DNS=localhost
 
 Write-Verbose -Message "Creating certificate subject `"$computername`" & friendly name `"$friendlyName`""
 
