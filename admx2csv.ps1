@@ -79,7 +79,7 @@ ForEach ($file in $admxFiles)
 
     if( -Not $data.PolicyDefinitions.PSObject.properties[ 'policies' ] )
     {
-        Write-Warning -Message "No policies defined in $($file.FullName)"
+        Write-Warning -Message "$($file.Name): No policies found"
         continue
     }
 
@@ -108,11 +108,11 @@ ForEach ($file in $admxFiles)
                     }
                     elseif( Test-Path -Path $admlFile )
                     {
-                        Write-Warning "$($file.admx): policy $($policy.Name): Bad XML found in ADML file $admlFile"
+                        Write-Warning "$($file.name): policy $($policy.Name): Bad XML found in ADML file $admlFile"
                     }
                     else
                     {
-                        Write-Warning "$($file.admx): policy $($policy.Name): ADML file $admlFile not found"
+                        Write-Warning "$($file.name): policy $($policy.Name): ADML file $admlFile not found"
                     }
                 }
                 else
@@ -140,11 +140,11 @@ ForEach ($file in $admxFiles)
                     }
                     elseif( Test-Path -Path $admlFile )
                     {
-                        Write-Warning "$($file.admx): policy $($policy.Name): Bad XML found in ADML file $admlFile"
+                        Write-Warning "$($file.name): policy $($policy.Name): Bad XML found in ADML file $admlFile"
                     }
                     else
                     {
-                        Write-Warning "$($file.admx): policy $($policy.Name): ADML file $admlFile not found"
+                        Write-Warning "$($file.name): policy $($policy.Name): ADML file $admlFile not found"
                     }
                 } 
                 else
@@ -169,13 +169,13 @@ ForEach ($file in $admxFiles)
                         }
                         else
                         {
-                            Write-Warning "$($file.admx): policy $($policy.Name) has no elements"
+                            Write-Warning "$($file.name): policy $($policy.Name) has no elements"
                         }
                         Add-Member -InputObject $policy -MemberType NoteProperty -Name valueName -Value $value
                     }
                     catch
                     {
-                        Write-Warning "$($file.admx): policy $($policy.Name): $_"
+                        Write-Warning "$($file.name): policy $($policy.Name): $_"
                     }
                 }
 
