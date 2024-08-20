@@ -36,7 +36,7 @@ Function totsclient( [string]$path , [switch]$noClipboard , [string]$prefix = 't
     else
     {
         ## deal with absolute path which may or may not be quoted at start with "
-	    [string]$tsclientPath = $path -replace '^(?<quote>"?)(?<drive>\w):' , "`${quote}\\$prefix\`${drive}$suffix"
+	    [string]$tsclientPath = $path.Trim() -replace '^(?<quote>"?)(?<drive>\w):' , "`${quote}\\$prefix\`${drive}$suffix"
         if( $tsclientPath -ieq $path )
         {
             Write-Warning -Message "No change made to path $path"
@@ -47,7 +47,15 @@ Function totsclient( [string]$path , [switch]$noClipboard , [string]$prefix = 't
         }
         else
         {
-            "`"$tsclientPath`"" | Set-Clipboard
+            ## quote it if contains spaces and not already quoted
+            if( $tsclientPath -match '^[^"].*\s+' )
+            {
+                "`"$tsclientPath`"" | Set-Clipboard
+            }
+            else ## no need for quoting
+            {
+                $tsclientPath | Set-Clipboard
+            }
         }
     }
 }
