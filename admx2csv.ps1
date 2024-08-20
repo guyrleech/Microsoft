@@ -29,6 +29,11 @@
 
 .NOTES
     Original code from @chentiangemalc https://chentiangemalc.wordpress.com/2014/10/02/powershell-script-to-extract-info-from-admx/
+
+    Modification History:
+
+    2024/08/19 - Initial release
+    2024/08/20 - Check for language folder & files added
 #>
 
 [CmdletBinding()]
@@ -65,6 +70,16 @@ $admxFiles = @( Get-ChildItem $policyDir -filter *.admx | Where-Object -Property
 
 Write-Verbose -Message "Got $($admxFiles.Count) admx files"
 
+if( $admxFiles.Count -eq 0 )
+{
+    Throw "No ADMX files found in $policyDir"
+}
+
+if( -Not ( Test-Path -Path "$policyDir\$language" -PathType Container) )
+{
+    Throw "Language folder $language not found in $policyDir"
+}
+
 [int]$counter = 0
 
 ForEach ($file in $admxFiles)
@@ -73,15 +88,21 @@ ForEach ($file in $admxFiles)
     Write-Verbose -Message "$counter / $($admxFiles.Count) : $($file.Name)"
 
     [xml]$data = Get-Content "$policyDir\$($file.Name)"
-    [xml]$lang = Get-Content "$policyDir\$language\$($file.Name.Replace(".admx",".adml"))"
-
-    $policyText = $lang.policyDefinitionResources.resources.stringTable.ChildNodes
-
     if( -Not $data.PolicyDefinitions.PSObject.properties[ 'policies' ] )
     {
         Write-Warning -Message "$($file.Name): No policies found"
         continue
     }
+
+    [string]$langfile = "$policyDir\$language\$($file.Name.Replace(".admx",".adml"))"
+    if( -Not ( Test-Path -Path $langfile ))
+    {
+        Write-Warning "$($file.name): No $language language file"
+        continue
+    }
+
+    [xml]$lang = Get-Content -Path $langfile
+    $policyText = $lang.policyDefinitionResources.resources.stringTable.ChildNodes
 
     $data.PolicyDefinitions.policies.ChildNodes | ForEach-Object {
 
@@ -94,7 +115,8 @@ ForEach ($file in $admxFiles)
                 ##Write-Verbose "`tProcessing policy $($policy.Name)"
                 $displayName = ($policyText | Where-Object { $_.PSObject.Properties[ 'id' ] -and $_.id -eq $policy.displayName.Substring(9).TrimEnd(')') }) | Select-Object -ExpandProperty '#text' -ErrorAction SilentlyContinue
                 $explainText = ($policyText | Where-Object { $_.PSObject.Properties[ 'id' ] -and $_.psobject.properties[ 'explainText' ] -and $_.id -eq $policy.explainText.Substring(9).TrimEnd(')') }) | Select-Object -ExpandProperty '#text' -ErrorAction SilentlyContinue
-              
+                $supportedOn = $null
+
                 if ($policy.SupportedOn.ref.Contains(":"))
                 {        
                     $source=$policy.SupportedOn.ref.Split(":")[0]
