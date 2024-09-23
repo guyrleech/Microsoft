@@ -24,7 +24,7 @@
     The placeholder name for unknown processes. Default is '<UNKNOWN>'.
 
 .PARAMETER properties
-    The properties to retrieve for each process
+    The properties to retrieve for each process. Pass $null or empty array to get all properties
 
 .PARAMETER quiet
     Suppresses warning output if specified.
@@ -34,6 +34,12 @@
 
 .PARAMETER noIndent
     Disables creatring indented name if specified.
+    
+.PARAMETER signing
+    Add digital signature information for the processes executable to the output
+    
+.PARAMETER signing
+    Add file and version information for the processes executable to the output
 
 .PARAMETER noChildren
     Excludes child processes from the output if specified.
@@ -52,20 +58,27 @@
    Get parent and child processes of the running process with pid 12345
 
 .EXAMPLE
-   & '.\Get Process Relatives.ps1' -name notepad.exe,winword.exe -properties *
+   & '.\Get Process Relatives.ps1' -name notepad.exe,winword.exe -properties $null
 
    Get parent and child processes of all running processes of notepad and winword, outputting all win32_process properties & added ones
 
 .EXAMPLE
    & '.\Get Process Relatives.ps1' -name powershell.exe -sessionid -1
 
-   Get parent and child processes of powershll.exe processes running in the same session as the script
+   Get parent and child processes of powershell.exe processes running in the same session as the script
+   
+.EXAMPLE
+   & '.\Get Process Relatives.ps1' -name powershell.exe -signing
+
+   Get parent and child processes of powershell.exe processes running all sessions and include digital signing detail of all processes
 
 .NOTES
     Modification History:
 
     2024/09/13  @guyrleech  Script born
     2024/09/16  @guyrleech  First release
+    2024/09/20  @guyrleech  Added -signing parameter
+    2024/09/22  @guyrleech  Made UNKNOWN object of type win32_process. Added -file for file detail including version
 #>
 
 [CmdletBinding(DefaultParameterSetName='name')]
@@ -80,8 +93,10 @@ Param
     [int]$indentMultiplier = 1 ,
     [string]$indenter = ' ' ,
     [string]$unknownProcessName = '<UNKNOWN>' ,
-    [string[]]$properties = @( 'IndentedName' , 'ProcessId' , 'ParentProcessId' , 'Sessionid' , '-' , 'Owner' , 'CreationDate' , 'Level' , 'CommandLine' , 'Service' ) ,
+    [object[]]$properties = @( 'IndentedName' , 'ProcessId' , 'ParentProcessId' , 'Sessionid' , '-' , 'Owner' , 'CreationDate' , 'Level' , 'Service' , 'CommandLine' ) ,
     [switch]$quiet ,
+    [switch]$signing ,
+    [switch]$file ,
     [switch]$norecurse ,
     [switch]$noIndent ,
     [switch]$noChildren ,
@@ -171,12 +186,32 @@ Function Get-DirectRelativeProcessDetails
             ## clone() method not available in PS 7.x
             $clone = [CimInstance]::new( $processDetail )
 
-            Add-Member -InputObject $clone -PassThru -NotePropertyMembers @{ ## return
+            Add-Member -InputObject $clone -NotePropertyMembers @{
                 Owner   = $owner
                 Service = $service
                 Level   = $level
                 '-'     = $(if( $firstCall ) { '*' } else {''})
             }
+
+            if( $signing )
+            {
+                $signingDetail = $null
+                if( -Not [string]::IsNullOrEmpty( $processDetail.Path ) )
+                {
+                    $signingDetail = Get-AuthenticodeSignature -FilePath $processDetail.Path
+                }
+                Add-Member -InputObject $clone -MemberType NoteProperty -Name Signing -Value $signingDetail
+            }
+            if( $file )
+            {
+                $fileInfo = $null
+                if( -Not [string]::IsNullOrEmpty( $processDetail.Path ) )
+                {
+                    $fileInfo = Get-ItemProperty -Path $processDetail.Path
+                }
+                Add-Member -InputObject $clone -MemberType NoteProperty -Name FileInfo -Value $fileInfo
+            }
+            $clone ## return
         }
         ## else no parent or excluded based on session id
     }
@@ -190,11 +225,21 @@ Function Get-DirectRelativeProcessDetails
     elseif( -not $quiet )
     {
         ## TODO search process auditing/sysmon ?
-        [pscustomobject]@{
+        $emptyResult = [CimInstance]::new( 'Win32_Process' , 'root/cimv2' )
+        Add-Member -InputObject $emptyResult -NotePropertyMembers @{
             Name = $unknownProcessName
             ProcessId = $id
             Level = $level
         }
+        if( $signing )
+        {
+            Add-Member -InputObject $emptyResult -MemberType NoteProperty -Name Signing -Value $null
+        }
+        if( $file )
+        {
+            Add-Member -InputObject $emptyResult -MemberType NoteProperty -Name File -Value $null
+        }
+        $emptyResult ## return
     }
 }
 
@@ -285,4 +330,16 @@ Write-Verbose -Message "Got $($script:runningServices.Count) running service pid
     $result
 })
 
-$results | Select-Object -Property $properties
+if( $signing -and -not $PSBoundParameters[ 'properties' ] -and $null -ne $properties )
+{
+    $properties += @{ name = 'Signature' ; expression = { $_.signing.Status }}
+}
+
+if( $null -eq $properties -or $properties.Count -eq 0 )
+{
+    $results
+}
+else
+{
+    $results | Select-Object -Property $properties
+}
