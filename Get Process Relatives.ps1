@@ -323,7 +323,7 @@ Write-Verbose -Message "Got $($script:runningServices.Count) running service pid
             Add-Member -InputObject $item -MemberType NoteProperty -Name IndentedName -Value ("$($indenter * ($levelRange.Maximum - $item.level) * $indentMultiplier)$($item.name)")
         }
     }
-    else ## not indenting
+    elseif( $null -ne $properties -and $properties.Count -gt 0 ) ## not indenting
     {
         $properties[ 0 ] = 'Name'
     }
