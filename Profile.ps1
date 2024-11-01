@@ -1,4 +1,4 @@
-﻿#requires -version 3.0
+#requires -version 3.0
 <#
     Give some machine info & stats for server core login when PowerShell is set as the shell in "Shell" value in HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
 
@@ -7,16 +7,22 @@
     Set $samples to 0 if you don't want to delay to measure CPU usage
 
     Guy Leech, 2018
+
+    Modification History:
+
+	2024/11/01  @guyrleech  Wasn't working for shell launched by sconfig
 #>
 
 [int]$samples = 5
 
-$parent = Get-Process -Id (Get-CimInstance -ClassName Win32_Process -Filter "processid = $pid"|select -ExpandProperty ParentProcessId) -EA SilentlyContinue
+$parent = get-ciminstance -ClassName win32_process -filter "ProcessId = '$((Get-CimInstance -ClassName Win32_Process -Filter `"processid = $pid`").ParentProcessId)'"
 
 [console]::Title = "Process id $pid started at $(Get-Date -Format G)"
 
+$parent 
+
 ## Only display for logon shell or if we can't find the parent
-if( ! $parent -or $parent.Name -eq 'userinit' )
+if( -Not $parent -or $parent.Name -eq 'userinit.exe' -or ( $parent.Name -eq 'cmd.exe' -and $parent.CommandLine -match 'servercoreshelllaunch' ))
 {
 	Get-CimInstance -ClassName Win32_ComputerSystem | Select Name,Domain,@{n='Installed Memory (GB)';e={[math]::round($_.TotalPhysicalMemory/1GB,2)}},NumberOfLogicalProcessors,NumberOfProcessors|Format-Table -Autosize
 
