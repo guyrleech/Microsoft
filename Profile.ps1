@@ -19,8 +19,6 @@ $parent = get-ciminstance -ClassName win32_process -filter "ProcessId = '$((Get-
 
 [console]::Title = "Process id $pid started at $(Get-Date -Format G)"
 
-$parent 
-
 ## Only display for logon shell or if we can't find the parent
 if( -Not $parent -or $parent.Name -eq 'userinit.exe' -or ( $parent.Name -eq 'cmd.exe' -and $parent.CommandLine -match 'servercoreshelllaunch' ))
 {
