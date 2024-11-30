@@ -12,6 +12,7 @@
 
     02/08/18  GRL  Added created and modified times and file owner
     06/08/18  GRL  Added remove and scrub options
+    30/11/24  GRL  Non-fatal if not NTFS
 #>
 
 <#
@@ -76,14 +77,17 @@ Param
 [hashtable]$params = @{ 'Path' = $path ; 'Recurse' = $recurse }
 
 ## check path is on NTFS
-[string]$drive = (Get-Item -Path $path -ErrorAction Stop).PSdrive
+[string]$drive = Get-Item -Path $path -ErrorAction Stop | Select-Object -ExpandProperty PSdrive -ErrorAction SilentlyContinue
 
-[string]$fileSystem = ( Get-CimInstance -ClassName win32_logicaldisk -Filter "DeviceId = '$($drive):'" ).FileSystem
+[string]$fileSystem = 'UNKNOWN'
+if( $null -ne $drive )
+{
+    $fileSystem = ( Get-CimInstance -ClassName win32_logicaldisk -Filter "DeviceId = '$($drive):'" ).FileSystem
+}
 
 if( $fileSystem -ne 'NTFS' )
 {
-    Write-Error "File system type of `"$path`" is $fileSystem, not NTFS, so there will be no alternate data streams"
-    Exit 1
+    Write-Warning "File system type of `"$path`" is $fileSystem, not NTFS, so there may not be alternate data streams"
 }
 
 ## read zone info from registry so we can display name rather than number
