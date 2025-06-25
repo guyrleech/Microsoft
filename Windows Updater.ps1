@@ -7,8 +7,17 @@
 .PARAMETER query
     The query to be used to search for windows updates
 
+.PARAMETER excludeRegex
+    Excludes updates whose title matches this regex, eg "preview"
+
 .PARAMETER force
     Force the restart of the computer if one is required
+
+.EXAMPLE
+    & '.\Windows Updater' -exclude preview
+
+    Check for available Windows Updates and prompt to download and install those where the title does not contain the word "preview"
+    Add -confirm:$false to not prompt
 
 .NOTES
     https://learn.microsoft.com/en-us/windows/win32/api/wuapi/nf-wuapi-iupdatesearcher-search
@@ -16,6 +25,8 @@
     Modification History:
 
     2020/11/20  @guyrleech  Script born
+    2025/04/30  @guyrleech  Added log parsing on failure
+    2025/06/25  @guyrleech  Added -excludeRegex
 #>
 
 <#
@@ -35,7 +46,10 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMA
 Param
 (
     [string]$query = "IsInstalled = 0 and Type = 'Software'" ,
-    [switch]$force
+    [string]$excludeRegex ,
+    [switch]$force ,
+    [switch]$noLogParsing ,
+    [string]$logFolder = "$env:windir\logs\WindowsUpdate"
 )
 
 ## https://learn.microsoft.com/en-us/windows/win32/api/wuapi/ne-wuapi-operationresultcode
@@ -49,7 +63,7 @@ Param
 )
 
 $updateSession = New-Object -comobject "Microsoft.Update.Session"
-
+$startTime = [datetime]::Now
 $updateSearcher = $updateSession.CreateupdateSearcher()
 $updateSearcher.Online = $true
 Write-Verbose -Message "$([datetime]::Now.ToString('G')): searching for updates with `"$query`""
@@ -65,12 +79,14 @@ else
     try
     {
         Write-Verbose "$([datetime]::Now.ToString('G')): $($searchResult.updates.Count) updates available"
+        [array]$filteredUpdates = @( $searchResult.Updates | Where-Object { [string]::IsNullOrEmpty( $excludeRegex ) -or $_.Title -notmatch $excludeRegex } )
+
         $searchResult.Updates | Select-Object -Property Title, @{n='KBArticleID';e={$_.KBArticleIDs}}, MsrcSeverity | Format-Table | Out-String | Write-Verbose
-        if( $PSCmdlet.ShouldProcess( $env:COMPUTERNAME , "Download & Install $($searchResult.updates.Count) updates" ) )
+        if( $PSCmdlet.ShouldProcess( $env:COMPUTERNAME , "Download & Install $($filteredUpdates.Count) updates ($($searchResult.updates.Count - $filteredUpdates.Count) filtered out)" ) )
         {
             $updatesToInstall = New-Object -ComObject Microsoft.Update.UpdateColl
 
-            foreach ($update in $searchResult.Updates)
+            foreach ($update in $filteredUpdates)
             {
                 [void]$updatesToInstall.Add($update)
             }
@@ -92,6 +108,46 @@ else
             if( $installationResult.ResultCode -ge 0 -and $installationResult.ResultCode -lt $resultCodes.Count )
             {
                 $result = $resultCodes[ $installationResult.ResultCode ]
+                if( -Not $noLogParsing -and $result -in @( 'Succeeded With Errors' , 'Failed' , 'Aborted' ))
+                {
+                    [array]$events = @( Get-WinEvent -FilterHashtable @{ Starttime = $startTime ; ProviderName = 'Microsoft-Windows-WindowsUpdateClient' ; Level = 1 ,2 , 3 } -Oldest -ErrorAction SilentlyContinue )
+
+                    Write-Verbose -Message "Got $($events.Count) events"
+                
+                <# ## Testing doesn't really give us anything of use - most hopeful is CBS.log
+                    $logFiles = @( Get-ChildItem -Path $logFolder -File | Where-Object { $_.LastWriteTime -ge $startTime -and $_.Length -gt 0 } | Select-Object -ExpandProperty FullName )
+                    if( $null -ne $logFiles -and $logFiles.Count -gt 0 )
+                    {
+                        [string]$system32 = [Environment]::GetFolderPath( [Environment+SpecialFolder]::System )
+                        ## comes from reverse engineering Get-WindowsUpdateLog
+                        [string]$outputFile = Join-Path $env:temp -ChildPath "windowsupdate.$pid.csv"
+                        Remove-Item -Path $outputFile -ErrorAction SilentlyContinue
+                        [string[]]$otherArguments = @( '-of' , 'CSV',
+                            '-o' , $outputFile ,
+                            '-i' , "$System32\wuaueng.dll;$system32\wuapi.dll;$System32\wuuhext.dll;$System32\wuuhmobile.dll;$System32\wuautoappupdate.dll;$System32\storewuauth.dll;$System32\wuauclt.exe;" ,
+                            '-y' )
+                        $output = tracerpt.exe ($logFiles + $otherArguments)
+                        $output | Write-Verbose
+                        if( $LASTEXITCODE -ne 0 )
+                        {
+                            Write-Warning "Error converting ETL traces : $output"
+                        }
+                        elseif( -Not ( Test-Path $outputFile -PathType Leaf ))
+                        {
+                            Write-Warning "Output file $outputfile missing"
+                        }
+                        else
+                        {
+                            [array]$events = @( Import-Csv -Path $outputFile )
+                            Write-Verbose -Message "Got $($events.Count) events from $outputFile"
+                        }
+                    }
+                    else
+                    {
+                        Write-Warning "No  log files found in $logFolder modified since $($startTime.ToString('G'))"
+                    }
+                #>
+                }
             }
             Add-Member -InputObject $installationResult -MemberType NoteProperty -Name Result -Value $result -PassThru ## output
             if( $installationResult.RebootRequired )
