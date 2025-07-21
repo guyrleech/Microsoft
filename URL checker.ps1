@@ -49,6 +49,7 @@
     2025/06/18  @guyrleech  Script born
     2025/07/15  @guyrleech  Added domain info button to get registrar and domain info
     2025/07/16  @guyrleech  Added declutter option to remove crap after ?
+    2025/07/21  @guyrleech  Added second call to UrlDecode( )
 #>
 
 [CmdletBinding()]
@@ -513,6 +514,7 @@ if( [string]::IsNullOrEmpty( $url ))
             ## remove safelinks and google tracking
             $cleanText = $clipboard -replace '^https://\w+\.safelinks\.protection\.outlook.com/\?url=' -replace '^https://www.google.com/url\?q='
         }
+        $cleanText = [System.Web.HttpUtility]::UrlDecode( $cleanText )
         Write-Verbose "$source text is $clipboard`nCleaned is $cleanText"
         if( $cleanText -eq $clipboard )
         {
