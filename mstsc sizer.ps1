@@ -63,6 +63,11 @@
     2026/07/06 @guyrleech  Added support for Azure hibernate context menu action
     2026/07/07 @guyrleech  Changed AVD tab a lot
     2026/07/08 @guyrleech  Added AVD session process list view with remote kill context menu action
+    2026/07/09 @guyrleech  Added Azure Config context menu item to change disk type on deallocated VMs
+    2026/07/09 @guyrleech  Added OS disk type changing
+    2026/07/16 @guyrleech  Added Azure Edit Tags context menu item to view/edit/add/delete VM tags
+    2026/07/16 @guyrleech  Added Assigned User column to AVD list view
+    
     ## TODO persist the "comment" column in memory so that it is available when undocked and redocked
     ## TODO make hypervisor operations async with a watcher thread
     ## TODO add history tab which is disabled by default (and thus audit)
@@ -100,6 +105,7 @@ Param
     [string]$percentage ,
     [switch]$usemsrdc ,
     [switch]$noFriendlyName ,
+    [switch]$keepRdpFile ,
     [switch]$noResize , ## use mstsc with no width/height parameters
     [string]$widthHeight , ## colon delimited
     [string]$xy , ## colon delimited
@@ -175,17 +181,12 @@ drivestoredirect:s:$drivesToRedirect
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:mstsc_msrdc_wrapper"
         mc:Ignorable="d"
-        Title="Guy's mstsc Wrapper Script" Height="500" Width="809">
+        Title="Guy's mstsc Wrapper Script" Height="520" Width="850" MinWidth="850" MinHeight="520">
     <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
         <TabControl HorizontalAlignment="Stretch" VerticalAlignment="Stretch" x:Name="tabControl" >
         
             <TabItem Header="Main">
                 <Grid  HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>   <!-- Displays/DataGrid -->
-                    <RowDefinition Height="*"/>      <!-- Main controls -->
-                    <RowDefinition Height="Auto"/>   <!-- Buttons -->
-                </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="23*"/>
                         <ColumnDefinition Width="50*"/>
@@ -193,9 +194,7 @@ drivestoredirect:s:$drivesToRedirect
                         <ColumnDefinition Width="68*"/>
                         <ColumnDefinition Width="518*"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Row="0" Grid.ColumnSpan="5" Height="110" Margin="15,10,-160,0" VerticalAlignment="Top" Width="907">
-                        <DataGrid x:Name="datagridDisplays" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" SelectionMode="Single" />
-                    </StackPanel>
+                    <DataGrid x:Name="datagridDisplays" Grid.ColumnSpan="5" HorizontalAlignment="Stretch" VerticalAlignment="Top" Height="110" Margin="15,10,10,0" SelectionMode="Single" />
                     <Label Content="Computer" HorizontalAlignment="Left" Height="38" Margin="14,132,0,0" VerticalAlignment="Top" Width="71" Grid.ColumnSpan="3"/>
                     <CheckBox x:Name="chkboxmsrdc" Grid.Column="4" Content="Use msrdc instead of mstsc" HorizontalAlignment="Left" Height="21" Margin="145,189,0,0" VerticalAlignment="Top" Width="292" IsEnabled="true"/>
                     <ComboBox x:Name="comboboxComputer" Grid.Column="2" HorizontalAlignment="Left" Height="27" Margin="14,137,0,0" VerticalAlignment="Top" Width="254" IsEditable="True" IsDropDownOpen="False" Grid.ColumnSpan="3">
@@ -223,8 +222,10 @@ drivestoredirect:s:$drivesToRedirect
                         </TextBox.InputBindings>
                     </TextBox>
                     <RadioButton x:Name="radioFillScreen" Grid.Column="4" Content="Fill Screen" HorizontalAlignment="Left" Height="24" Margin="145,348,0,0" VerticalAlignment="Top" Width="206" GroupName="WindowSize"/>
-                 
-                     <Grid Grid.Row="2" Grid.ColumnSpan="5" VerticalAlignment="Bottom" Margin="5">
+                    <CheckBox x:Name="chkboxRdpSigning" Grid.Column="4" Content="RDP File Signing" HorizontalAlignment="Left" Height="21" Margin="145,378,0,0" VerticalAlignment="Top" Width="160" ToolTip="Sign the RDP file before launching so mstsc/msrdc does not show an untrusted publisher warning"/>
+                    <ComboBox x:Name="comboboxSigningCert" Grid.Column="4" HorizontalAlignment="Left" Height="25" Margin="314,375,0,0" VerticalAlignment="Top" Width="250" IsEnabled="False" ToolTip="Code signing certificate to use for RDP file signing"/>
+
+                    <Grid Grid.ColumnSpan="5" VerticalAlignment="Bottom" Margin="5">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
@@ -512,9 +513,13 @@ drivestoredirect:s:$drivesToRedirect
                                     <MenuItem Header="Extensions + Applications" x:Name="AzureExtensionsApplicationsContextMenu" />
                                     <MenuItem Header="Rename" x:Name="AzureRenameMenu" />
                                     <MenuItem Header="Reconfigure" x:Name="AzureReconfigureMenu" />
+                                    <MenuItem Header="Change Disk Type" x:Name="AzureChangeDiskTypeContextMenu" />
+                                    <MenuItem Header="Edit Tags" x:Name="AzureEditTagsContextMenu" />
                                 </MenuItem>
                                 <MenuItem Header="Delete" x:Name="AzureDeletionContextMenu">
                                     <MenuItem Header="Delete VM" x:Name="AzureDeleteContextMenu" />
+                                    <MenuItem Header="Delete Session Host" x:Name="AzureDeleteSessionHostContextMenu" />
+                                    <MenuItem Header="Delete Session Host &amp; VM" x:Name="AzureDeleteSessionHostAndVMContextMenu" />
                                      <!-- <MenuItem Header="Delete VM + Disks" x:Name="AzureDeleteAllContextMenu" /> -->
                                 </MenuItem>
                                 <MenuItem Header="Sessions" x:Name="AzureSessionContextMenu">
@@ -646,6 +651,99 @@ drivestoredirect:s:$drivesToRedirect
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button x:Name="btnInputTextOK" Content="OK" Height="32" MinWidth="90" Margin="0,0,8,0" IsDefault="True"/>
             <Button x:Name="btnInputTextCancel" Content="Cancel" Height="32" MinWidth="90" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$comboSelectXAML = @'
+<Window x:Class="WPF_Scratchpad.Window1"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WPF_Scratchpad"
+        mc:Ignorable="d"
+        Title="Window1" Height="220" Width="460" MinHeight="180" MinWidth="360" ResizeMode="NoResize">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Label x:Name="lblComboHeader" Content="" Grid.Row="0" Margin="0,0,0,4" HorizontalAlignment="Stretch" FontWeight="Bold"/>
+        <Label x:Name="lblComboCurrentValue" Content="" Grid.Row="1" Margin="0,0,0,8" HorizontalAlignment="Stretch"/>
+        <Label x:Name="lblComboLabel" Content="New disk type:" Grid.Row="2" Margin="0,0,0,2" HorizontalAlignment="Stretch"/>
+        <ComboBox x:Name="comboBoxSelect" Grid.Row="3" Margin="0,0,0,0" HorizontalAlignment="Stretch" IsReadOnly="True"/>
+
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button x:Name="btnComboOK" Content="OK" Height="32" MinWidth="90" Margin="0,0,8,0" IsDefault="True"/>
+            <Button x:Name="btnComboCancel" Content="Cancel" Height="32" MinWidth="90" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$azureTagsEditorXAML = @'
+<Window x:Class="WPF_Scratchpad.TagsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Edit Azure Tags" Height="540" Width="640" MinHeight="300" MinWidth="440" WindowStartupLocation="CenterOwner">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header label -->
+        <Label x:Name="lblTagsHeader" Content="" Grid.Row="0" FontWeight="Bold" Margin="0,0,0,4" FontSize="13"/>
+
+        <!-- Column header row -->
+        <Grid Grid.Row="1" Margin="0,0,0,2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="210"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="32"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Tag Name" FontWeight="Bold" Grid.Column="0" Margin="4,0,0,0"/>
+            <TextBlock Text="Value" FontWeight="Bold" Grid.Column="1" Margin="2,0,0,0"/>
+        </Grid>
+
+        <!-- Scrollable tag rows -->
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,4">
+            <ItemsControl x:Name="tagsItemsControl"/>
+        </ScrollViewer>
+
+        <!-- Separator -->
+        <Separator Grid.Row="3" Margin="0,2,0,6"/>
+
+        <!-- Add new tag row -->
+        <Grid Grid.Row="4" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="210"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="txtNewTagName" Grid.Column="0" Margin="0,0,4,0" ToolTip="New tag name" Height="26" VerticalContentAlignment="Center"/>
+            <TextBox x:Name="txtNewTagValue" Grid.Column="1" Margin="0,0,4,0" ToolTip="New tag value" Height="26" VerticalContentAlignment="Center"/>
+            <Button x:Name="btnAddTag" Content="+ _Add Tag" Grid.Column="2" Padding="8,2" Height="26"/>
+        </Grid>
+
+        <!-- OK / Cancel buttons -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="btnTagsOK" Content="OK" Width="90" Margin="0,0,8,0" Height="32" IsDefault="True"/>
+            <Button x:Name="btnTagsCancel" Content="Cancel" Width="90" Height="32" IsCancel="True"/>
         </StackPanel>
     </Grid>
 </Window>
@@ -1896,10 +1994,41 @@ Function New-RemoteSession
         {
             Write-Verbose -Message "Writing $($rdpFileContents.Length) bytes to $tempRdpFile"
             ## TODO do we need to make sure no duplicates?
-            ( $rdpFileContents + "`n" + $(if( -Not $wpfchkboxDoNotApply.IsChecked ) { $WPFtxtBoxOtherOptions.Text } )) | Set-Content -Path $tempRdpFile -Force
+            [string]$fullRdpContent = $rdpFileContents + "`n" + $(if( -Not $wpfchkboxDoNotApply.IsChecked ) { $WPFtxtBoxOtherOptions.Text })
+            $fullRdpContent | Set-Content -Path $tempRdpFile -Force
             if( -Not $? )
             {
                 Throw "Failed to write rdp file contents to $tempRdpFile"
+            }
+
+            ## Sign the RDP file if the user has opted in and a certificate is selected
+            if( $WPFchkboxRdpSigning.IsChecked -and $null -ne $WPFcomboboxSigningCert.SelectedItem )
+            {
+                [string]$rdpsignExe = Join-Path -Path $env:SystemRoot -ChildPath 'System32\rdpsign.exe'
+                if( Test-Path -Path $rdpsignExe -PathType Leaf )
+                {
+                    [string]$signingThumbprint = $WPFcomboboxSigningCert.SelectedItem.Tag
+                    if( [string]::IsNullOrEmpty( $signingThumbprint ) )
+                    {
+                        [void][Windows.MessageBox]::Show( 'Could not retrieve certificate thumbprint from selection' , 'RDP Signing Error' , 'Ok' , 'Error' )
+                    }
+                    else
+                    {
+                        Write-Verbose -Message "Signing $tempRdpFile with certificate thumbprint $signingThumbprint"
+                        $rdpsignProcess = Start-Process -FilePath $rdpsignExe -ArgumentList "/sha256 $signingThumbprint /q `"$tempRdpFile`"" -Wait -PassThru -WindowStyle Hidden
+                        ## rdpsign.exe zeroes the file on failure, so always check and restore if needed
+                        if( $null -eq $rdpsignProcess -or $rdpsignProcess.ExitCode -ne 0 -or (Get-Item -Path $tempRdpFile -ErrorAction SilentlyContinue).Length -eq 0 )
+                        {
+                            Write-Verbose -Message "rdpsign.exe failed (exit code $($rdpsignProcess.ExitCode)) - restoring RDP file content"
+                            $fullRdpContent | Set-Content -Path $tempRdpFile -Force
+                            [void][Windows.MessageBox]::Show( "rdpsign.exe failed (exit code $($rdpsignProcess.ExitCode))`nThe RDP file will not be signed" , 'RDP Signing Error' , 'Ok' , 'Warning' )
+                        }
+                    }
+                }
+                else
+                {
+                    [void][Windows.MessageBox]::Show( "rdpsign.exe not found at $rdpsignExe" , 'RDP Signing Error' , 'Ok' , 'Error' )
+                }
             }
         }
         
@@ -2059,7 +2188,7 @@ Function New-RemoteSession
             }
         }
 
-        if( $tempRdpFile )
+        if( $tempRdpFile -and -Not $keepRdpFile )
         {
             Remove-Item -Path $tempRdpFile
             $tempRdpFile = $null
@@ -2080,7 +2209,7 @@ Function New-RemoteSession
     }
     finally
     {
-        if( $tempRdpFile )
+        if( $tempRdpFile -and -Not $keepRdpFile )
         {
             Remove-Item -Path $tempRdpFile -Force -ErrorAction SilentlyContinue
         }
@@ -2852,6 +2981,7 @@ Function Add-AzureVMsToListView
                      'Sessions' = $sessionHost.Session
                      'AVD Status' = $sessionHost.Status
                      'Allow New Session' = $sessionHost.AllowNewSession
+                     'Assigned User' = if( -Not [string]::IsNullOrWhiteSpace( $sessionHost.AssignedUser ) ) { $sessionHost.AssignedUser } else { $null }
                 }
             }
 
@@ -2886,7 +3016,8 @@ Function Set-AzureHostPoolColumn
         @{ Header = 'Workspace Friendly Name' ; Binding = 'Workspace Friendly Name' } ,
         @{ Header = 'Sessions'   ; Binding = 'Sessions' } ,
         @{ Header = 'AVD Status' ; Binding = 'AVD Status' } ,
-        @{ Header = 'Allow New Session' ; Binding = 'Allow New Session' }
+        @{ Header = 'Allow New Session' ; Binding = 'Allow New Session' } ,
+        @{ Header = 'Assigned User' ; Binding = 'Assigned User' }
     )
 
     if( $showHostPool )
@@ -2933,6 +3064,16 @@ Function Set-AzureSessionMenuState
     if( $null -ne $WPFAzureRunContextMenu )
     {
         $WPFAzureRunContextMenu.IsEnabled = $true
+    }
+
+    if( $null -ne $WPFAzureDeleteSessionHostContextMenu )
+    {
+        $WPFAzureDeleteSessionHostContextMenu.IsEnabled = $avdEnabled
+    }
+
+    if( $null -ne $WPFAzureDeleteSessionHostAndVMContextMenu )
+    {
+        $WPFAzureDeleteSessionHostAndVMContextMenu.IsEnabled = $avdEnabled
     }
 }
 
@@ -3501,6 +3642,29 @@ Function Get-AzureAVDSessionHost
     }
 
     $sessionHost
+}
+
+Function Remove-AzureVMEntry
+{
+    Param
+    (
+        [Parameter(Mandatory)][pscustomobject]$selection
+    )
+
+    Import-Module -Name Az.Compute -Verbose:$false
+    $actionResult = $null
+    $actionResult = Remove-AzVM -Name $selection.Name -ResourceGroupName $selection.ResourceGroup -Force -Confirm:$false -ErrorAction Stop
+    if( $null -ne $actionResult -and $actionResult.Status -ieq 'Failed' )
+    {
+        Write-Warning -Message "Delete VM failed for $($selection.Name): $($actionResult.Error)"
+        [void][Windows.MessageBox]::Show( $mainWindow , "Delete failed for $($selection.Name)`n$($actionResult.Error)" , 'Azure Delete VM' , 'Ok' , 'Error' )
+        return $false
+    }
+    else
+    {
+        Write-Host "Deleted VM: $($selection.Name)" -ForegroundColor Green
+        return $true
+    }
 }
 
 Function Get-AzureAVDUserSessions
@@ -5412,7 +5576,7 @@ Function Process-Action
                     continue
                 }
 
-                if( $Operation -match 'PowerOn|Detail|Resume|Clipboard|TakeSnapshot|MessageSession|OpenInPortal|((Manage|Revert|Delete).*Snapshot)' ) ## don't need to prompt or will prompt with more information later
+                if( $Operation -match 'PowerOn|Detail|Resume|Clipboard|TakeSnapshot|MessageSession|OpenInPortal|ChangeDiskType|EditTags|((Manage|Revert|Delete).*Snapshot)' ) ## don't need to prompt or will prompt with more information later
                 {
                     $answer = 'yes'
                 }
@@ -5491,21 +5655,329 @@ Function Process-Action
                     [string]$portalUrl = "https://portal.azure.com/#resource/subscriptions/$([uri]::EscapeDataString($subscriptionId))/resourceGroups/$([uri]::EscapeDataString($selection.ResourceGroup))/providers/Microsoft.Compute/virtualMachines/$([uri]::EscapeDataString($selection.Name))/overview"
                     Start-Process -FilePath $portalUrl -Verb Open
                 }
-                elseif( $operation -ieq 'Azure_Delete' )
+                elseif( $operation -ieq 'Azure_ChangeDiskType' )
                 {
                     try
                     {
                         Import-Module -Name Az.Compute -Verbose:$false
-                        $actionResult = $null
-                        $actionResult = Remove-AzVM -Name $selection.Name -ResourceGroupName $selection.ResourceGroup -Force -Confirm:$false -ErrorAction Stop
-                        if( $null -ne $actionResult -and $actionResult.Status -ieq 'Failed' )
+
+                        # Check the VM is deallocated
+                        if( $selection.PowerState -notmatch 'deallocat' )
                         {
-                            Write-Warning -Message "Delete VM failed for $($selection.Name): $($actionResult.Error)"
-                            [void][Windows.MessageBox]::Show( $mainWindow , "Delete failed for $($selection.Name)`n$($actionResult.Error)" , 'Azure Delete VM' , 'Ok' , 'Error' )
+                            [void][Windows.MessageBox]::Show( $mainWindow , "$($selection.Name) must be deallocated before changing disk type.`nCurrent power state: $($selection.PowerState)" , 'Change Disk Type' , 'Ok' , 'Warning' )
+                            continue
                         }
-                        else
+
+                        [hashtable]$diskTypeFriendlyNames = @{
+                            'Standard_LRS'    = 'Standard HDD LRS'
+                            'StandardSSD_LRS' = 'Standard SSD LRS'
+                            'Premium_LRS'     = 'Premium SSD LRS'
+                            'Premium_ZRS'     = 'Premium SSD ZRS'
+                            'StandardSSD_ZRS' = 'Standard SSD ZRS'
+                            'UltraSSD_LRS'    = 'Ultra SSD LRS'
+                            'PremiumV2_LRS'   = 'Premium SSD v2 LRS'
+                        }
+
+                        $vmFull = $null
+                        $vmFull = Get-AzVM -Name $selection.Name -ResourceGroupName $selection.ResourceGroup -ErrorAction Stop
+
+                        [string]$osDiskId   = $vmFull.StorageProfile.OsDisk.ManagedDisk.Id
+                        [string]$osDiskName = $vmFull.StorageProfile.OsDisk.Name
+                        [string]$osDiskRG   = ( $osDiskId -replace '^.*resourceGroups/([^/]+)/.*$' , '$1' )
+
+                        $osDiskResource = $null
+                        $osDiskResource = Get-AzDisk -ResourceGroupName $osDiskRG -DiskName $osDiskName -ErrorAction Stop
+
+                        [string]$currentSkuName = $osDiskResource.Sku.Name
+                        [string]$currentFriendly = if( $diskTypeFriendlyNames.ContainsKey( $currentSkuName ) ) { $diskTypeFriendlyNames[ $currentSkuName ] } else { $currentSkuName }
+
+                        # Build list of available types excluding the current one
+                        [array]$availableTypes = @( $diskTypeFriendlyNames.GetEnumerator() | Where-Object { $_.Key -ne $currentSkuName } | Sort-Object Value | Select-Object -ExpandProperty Value )
+
+                        if( $changeDiskWindow = New-WPFWindow -inputXAML $comboSelectXAML )
                         {
-                            Write-Host "Deleted VM: $($selection.Name)" -ForegroundColor Green
+                            $WPFbtnComboOK.Add_Click({
+                                $_.Handled = $true
+                                $changeDiskWindow.DialogResult = $true
+                                $changeDiskWindow.Close()
+                            })
+                            $changeDiskWindow.Title   = "Change Disk Type - $($selection.Name)"
+                            $WPFlblComboHeader.Content        = "VM: $($selection.Name)"
+                            $WPFlblComboCurrentValue.Content  = "Current OS disk type: $currentFriendly"
+                            $WPFlblComboLabel.Content         = "New disk type:"
+                            ForEach( $t in $availableTypes ) { [void]$WPFcomboBoxSelect.Items.Add( $t ) }
+                            $WPFcomboBoxSelect.SelectedIndex  = 0
+
+                            if( $changeDiskWindow.ShowDialog() )
+                            {
+                                [string]$selectedFriendly = $WPFcomboBoxSelect.SelectedItem
+                                [string]$newSkuName = ( $diskTypeFriendlyNames.GetEnumerator() | Where-Object { $_.Value -eq $selectedFriendly } | Select-Object -First 1 -ExpandProperty Key )
+
+                                if( -Not [string]::IsNullOrWhiteSpace( $newSkuName ) )
+                                {
+                                    # Update OS disk
+                                    $diskUpdate = New-AzDiskUpdateConfig -SkuName $newSkuName
+                                    $updateResult = $null
+                                    $updateResult = Update-AzDisk -ResourceGroupName $osDiskRG -DiskName $osDiskName -DiskUpdate $diskUpdate -ErrorAction Stop
+
+                                    # Update any data disks
+                                    [array]$dataDisks = @( $vmFull.StorageProfile.DataDisks | Where-Object { $null -ne $_.ManagedDisk } )
+                                    ForEach( $dataDisk in $dataDisks )
+                                    {
+                                        [string]$ddId   = $dataDisk.ManagedDisk.Id
+                                        [string]$ddName = $dataDisk.Name
+                                        [string]$ddRG   = ( $ddId -replace '^.*resourceGroups/([^/]+)/.*$' , '$1' )
+                                        try
+                                        {
+                                            $ddUpdate = New-AzDiskUpdateConfig -SkuName $newSkuName
+                                            $null = Update-AzDisk -ResourceGroupName $ddRG -DiskName $ddName -DiskUpdate $ddUpdate -ErrorAction Stop
+                                        }
+                                        catch
+                                        {
+                                            Write-Warning -Message "Failed to update data disk $ddName for $($selection.Name): $($_.Exception.Message)"
+                                        }
+                                    }
+
+                                    Write-Host "Changed disk type for $($selection.Name) from $currentFriendly to $selectedFriendly" -ForegroundColor Green
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "Change disk type error for $($selection.Name): $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "Change disk type failed for $($selection.Name)`n$($_.Exception.Message)" , 'Change Disk Type' , 'Ok' , 'Error' )
+                    }
+                }
+                elseif( $operation -ieq 'Azure_EditTags' )
+                {
+                    try
+                    {
+                        Import-Module -Name Az.Compute   -Verbose:$false
+                        Import-Module -Name Az.Resources -Verbose:$false
+
+                        $vmFull = $null
+                        $vmFull = Get-AzVM -Name $selection.Name -ResourceGroupName $selection.ResourceGroup -ErrorAction Stop
+
+                        # Snapshot of original tags (sorted)
+                        [hashtable]$originalTags = @{}
+                        if( $null -ne $vmFull.Tags )
+                        {
+                            foreach( $kv in $vmFull.Tags.GetEnumerator() )
+                            {
+                                $originalTags[ $kv.Key ] = $kv.Value
+                            }
+                        }
+
+                        if( $tagsWindow = New-WPFWindow -inputXAML $azureTagsEditorXAML )
+                        {
+                            $tagsWindow.Owner = $mainWindow
+                            $WPFlblTagsHeader.Content = "Tags for VM: $($selection.Name)   ($($originalTags.Count) tag(s))"
+
+                            # List tracking each row's data
+                            $tagRows = [System.Collections.Generic.List[hashtable]]::new()
+
+                            # ── helper function: add one tag row to the ItemsControl ──────────────
+                            function Add-AzureTagRow
+                            {
+                                Param(
+                                    [string]$tagName  = '' ,
+                                    [string]$tagValue = '' ,
+                                    [bool]$isNew      = $false
+                                )
+
+                                $rowGrid = New-Object -TypeName System.Windows.Controls.Grid
+                                $rowGrid.Margin = [System.Windows.Thickness]::new( 0 , 2 , 0 , 2 )
+
+                                $c0 = New-Object System.Windows.Controls.ColumnDefinition ; $c0.Width = [System.Windows.GridLength]::new( 210 )
+                                $c1 = New-Object System.Windows.Controls.ColumnDefinition ; $c1.Width = [System.Windows.GridLength]::new( 1 , [System.Windows.GridUnitType]::Star )
+                                $c2 = New-Object System.Windows.Controls.ColumnDefinition ; $c2.Width = [System.Windows.GridLength]::new( 32 )
+                                [void]$rowGrid.ColumnDefinitions.Add( $c0 )
+                                [void]$rowGrid.ColumnDefinitions.Add( $c1 )
+                                [void]$rowGrid.ColumnDefinitions.Add( $c2 )
+
+                                # Name: Label for existing, TextBox for new
+                                if( $isNew )
+                                {
+                                    $nameCtrl = New-Object -TypeName System.Windows.Controls.TextBox
+                                    $nameCtrl.Text = $tagName
+                                    $nameCtrl.Height = 24
+                                    $nameCtrl.VerticalContentAlignment = [System.Windows.VerticalAlignment]::Center
+                                    $nameCtrl.Margin = [System.Windows.Thickness]::new( 0 , 0 , 4 , 0 )
+                                    $nameCtrl.ToolTip = 'Tag name (must be unique)'
+                                }
+                                else
+                                {
+                                    $nameCtrl = New-Object -TypeName System.Windows.Controls.TextBlock
+                                    $nameCtrl.Text = $tagName
+                                    $nameCtrl.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+                                    $nameCtrl.Margin = [System.Windows.Thickness]::new( 4 , 0 , 4 , 0 )
+                                    $nameCtrl.ToolTip = $tagName
+                                }
+                                [System.Windows.Controls.Grid]::SetColumn( $nameCtrl , 0 )
+                                [void]$rowGrid.Children.Add( $nameCtrl )
+
+                                # Value TextBox
+                                $valueTB = New-Object -TypeName System.Windows.Controls.TextBox
+                                $valueTB.Text = $tagValue
+                                $valueTB.Height = 24
+                                $valueTB.VerticalContentAlignment = [System.Windows.VerticalAlignment]::Center
+                                $valueTB.Margin = [System.Windows.Thickness]::new( 0 , 0 , 4 , 0 )
+                                [System.Windows.Controls.Grid]::SetColumn( $valueTB , 1 )
+                                [void]$rowGrid.Children.Add( $valueTB )
+
+                                # Delete (X) button
+                                $delBtn = New-Object -TypeName System.Windows.Controls.Button
+                                $delBtn.Content = 'X'
+                                $delBtn.Foreground = [System.Windows.Media.Brushes]::Red
+                                $delBtn.FontWeight = [System.Windows.FontWeights]::Bold
+                                $delBtn.Padding = [System.Windows.Thickness]::new( 2 )
+                                $delBtn.Height = 24
+                                $delBtn.ToolTip = 'Delete this tag'
+                                [System.Windows.Controls.Grid]::SetColumn( $delBtn , 2 )
+                                [void]$rowGrid.Children.Add( $delBtn )
+
+                                $rowData = @{
+                                    Name      = $tagName
+                                    IsNew     = $isNew
+                                    IsDeleted = $false
+                                    RowGrid   = $rowGrid
+                                    ValueTB   = $valueTB
+                                    NameCtrl  = $nameCtrl  # TextBox if new, TextBlock if existing
+                                }
+                                [void]$tagRows.Add( $rowData )
+                                [void]$WPFtagsItemsControl.Items.Add( $rowGrid )
+
+                                # Capture by value for the click closure
+                                $capturedRow  = $rowData
+                                $capturedGrid = $rowGrid
+                                $delBtn.Add_Click( {
+                                    $capturedRow.IsDeleted = $true
+                                    [void]$WPFtagsItemsControl.Items.Remove( $capturedGrid )
+                                }.GetNewClosure() )
+                            }
+
+                            # Add existing tags (sorted alphabetically)
+                            foreach( $kv in $originalTags.GetEnumerator() | Sort-Object -Property Key )
+                            {
+                                Add-AzureTagRow -tagName $kv.Key -tagValue $kv.Value -isNew $false
+                            }
+
+                            # ── Add Tag button handler ────────────────────────────────────────────
+                            $WPFbtnAddTag.Add_Click( {
+                                $newName  = $WPFtxtNewTagName.Text.Trim()
+                                $newValue = $WPFtxtNewTagValue.Text
+
+                                if( [string]::IsNullOrWhiteSpace( $newName ) )
+                                {
+                                    [void][Windows.MessageBox]::Show( $tagsWindow , 'Tag name cannot be empty.' , 'Add Tag' , 'Ok' , 'Warning' )
+                                    return
+                                }
+
+                                # Collect all current non-deleted names
+                                [array]$currentNames = @(
+                                    $tagRows | Where-Object { -not $_.IsDeleted } | ForEach-Object {
+                                        if( $_.IsNew ) { $_.NameCtrl.Text.Trim() } else { $_.Name }
+                                    }
+                                )
+
+                                if( $currentNames -icontains $newName )
+                                {
+                                    [void][Windows.MessageBox]::Show( $tagsWindow , "Tag '$newName' already exists." , 'Add Tag' , 'Ok' , 'Warning' )
+                                    return
+                                }
+
+                                Add-AzureTagRow -tagName $newName -tagValue $newValue -isNew $true
+                                $WPFtxtNewTagName.Text  = ''
+                                $WPFtxtNewTagValue.Text = ''
+                                $WPFtxtNewTagName.Focus() | Out-Null
+                            } )
+
+                            # ── OK button handler ─────────────────────────────────────────────────
+                            $WPFbtnTagsOK.Add_Click( {
+                                $_.Handled = $true
+                                $tagsWindow.DialogResult = $true
+                                $tagsWindow.Close()
+                            } )
+
+                            if( $tagsWindow.ShowDialog() )
+                            {
+                                # Build new tags hashtable from current UI state
+                                [hashtable]$newTags = @{}
+                                [System.Collections.Generic.List[string]]$duplicateCheck = New-Object -TypeName System.Collections.Generic.List[string]
+                                [bool]$hasDuplicate = $false
+
+                                foreach( $row in $tagRows )
+                                {
+                                    if( $row.IsDeleted ) { continue }
+                                    [string]$n = if( $row.IsNew ) { $row.NameCtrl.Text.Trim() } else { $row.Name }
+                                    [string]$v = $row.ValueTB.Text
+
+                                    if( [string]::IsNullOrWhiteSpace( $n ) ) { continue }
+
+                                    if( $duplicateCheck -icontains $n )
+                                    {
+                                        [void][Windows.MessageBox]::Show( $mainWindow , "Duplicate tag name found: '$n'. Please fix before saving." , 'Edit Tags' , 'Ok' , 'Warning' )
+                                        $hasDuplicate = $true
+                                        break
+                                    }
+                                    [void]$duplicateCheck.Add( $n )
+                                    $newTags[ $n ] = $v
+                                }
+
+                                if( -not $hasDuplicate )
+                                {
+                                    # Determine what changed
+                                    [System.Collections.Generic.List[string]]$changeLines = New-Object -TypeName System.Collections.Generic.List[string]
+
+                                    foreach( $key in $originalTags.Keys )
+                                    {
+                                        if( -not $newTags.ContainsKey( $key ) )
+                                        {
+                                            [void]$changeLines.Add( "Delete:  $key" )
+                                        }
+                                    }
+                                    foreach( $kv in $newTags.GetEnumerator() )
+                                    {
+                                        if( -not $originalTags.ContainsKey( $kv.Key ) )
+                                        {
+                                            [void]$changeLines.Add( "Add:     $($kv.Key) = '$($kv.Value)'" )
+                                        }
+                                        elseif( $originalTags[ $kv.Key ] -cne $kv.Value )
+                                        {
+                                            [void]$changeLines.Add( "Modify:  $($kv.Key)  '$($originalTags[$kv.Key])' -> '$($kv.Value)'" )
+                                        }
+                                    }
+
+                                    if( $changeLines.Count -eq 0 )
+                                    {
+                                        [void][Windows.MessageBox]::Show( $mainWindow , "No tag changes detected for $($selection.Name)." , 'Edit Tags' , 'Ok' , 'Information' )
+                                    }
+                                    else
+                                    {
+                                        [string]$summary = "$($changeLines.Count) change(s) for '$($selection.Name)':`n`n" + ( $changeLines -join "`n" ) + "`n`nApply these changes?"
+                                        if( [Windows.MessageBox]::Show( $mainWindow , $summary , 'Confirm Tag Changes' , 'YesNo' , 'Question' ) -ieq 'Yes' )
+                                        {
+                                            $null = Update-AzTag -ResourceId $vmFull.Id -Tag $newTags -Operation Replace -ErrorAction Stop
+                                            Write-Host "Tags updated for $($selection.Name): $($changeLines.Count) change(s)" -ForegroundColor Green
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "Edit tags error for $($selection.Name): $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "Edit tags failed for $($selection.Name)`n$($_.Exception.Message)" , 'Edit Azure Tags' , 'Ok' , 'Error' )
+                    }
+                }
+                elseif( $operation -ieq 'Azure_Delete' )
+                {
+                    try
+                    {
+                        if( Remove-AzureVMEntry -selection $selection )
+                        {
                             $refreshAzureList = $true
                         }
                     }
@@ -5513,6 +5985,32 @@ Function Process-Action
                     {
                         Write-Warning -Message "Delete VM error for $($selection.Name): $($_.Exception.Message)"
                         [void][Windows.MessageBox]::Show( $mainWindow , "Delete failed for $($selection.Name)`n$($_.Exception.Message)" , 'Azure Delete VM' , 'Ok' , 'Error' )
+                    }
+                }
+                elseif( $operation -ieq 'Azure_DeleteSessionHost' -or $operation -ieq 'Azure_DeleteSessionHostAndVM' )
+                {
+                    try
+                    {
+                        if( [string]::IsNullOrEmpty( $selection.HostPool ) )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "$($selection.Name) is not an AVD session host" , 'Delete Session Host' , 'Ok' , 'Warning' )
+                            continue
+                        }
+
+                        $sessionHost = Get-AzureAVDSessionHost -selection $selection
+                        $actonResult = Invoke-AzRestMethod -Method DELETE -Path "$($sessionHost.Id)?api-version=$AVDAPIversion" -ErrorAction Stop
+                        Write-Host "Removed session host: $($selection.Name) from host pool $($selection.HostPool)" -ForegroundColor Green
+
+                        if( $operation -ieq 'Azure_DeleteSessionHostAndVM' )
+                        {
+                            [void]( Remove-AzureVMEntry -selection $selection )
+                        }
+                        $refreshAzureList = $true
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "Delete session host error for $($selection.Name): $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "Delete session host failed for $($selection.Name)`n$($_.Exception.Message)" , 'Delete Session Host' , 'Ok' , 'Error' )
                     }
                 }
                 elseif( $operation -ieq 'Azure_Detail' )
@@ -7428,6 +7926,11 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
         $WPFbuttonHyperVApplyFilter.Add_Click({
             $_.Handled = $true
             Write-Verbose "Hyper-V Apply Filter clicked"
+            if( [string]::IsNullOrWhiteSpace( $WPFtextBoxHyperVHost.Text ) )
+            {
+                [void][Windows.MessageBox]::Show( 'No Hyper-V host specified' , 'Hyper-V Host Required' , 'Ok' , 'Error' )
+                return
+            }
             Add-HyperVVMsToListView -filter $WPFtextBoxHyperVFilter.Text -regex $WPFcheckBoxHyperVRegEx.IsChecked -hyperVhost $WPFtextBoxHyperVHost.Text -all $WPFcheckBoxHyperVAllVMs.IsChecked
         })
 
@@ -7466,6 +7969,10 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
         $WPFAzureDrainModeOffSessionContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_DrainModeOffSession' })
         $WPFAzureOpenInPortalContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_OpenInPortal' })
         $WPFAzureDeleteContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_Delete' })
+        $WPFAzureDeleteSessionHostContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_DeleteSessionHost' })
+        $WPFAzureDeleteSessionHostAndVMContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_DeleteSessionHostAndVM' })
+        $WPFAzureChangeDiskTypeContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_ChangeDiskType' })
+        $WPFAzureEditTagsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_EditTags' })
         $WPFAzureNameToClipboard.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'NameToClipboard' })
 
         $WPFlistViewAzureVMs.Add_PreviewMouseLeftButtonDown({
@@ -7475,6 +7982,31 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
               [Parameter(Mandatory)][System.Windows.Input.MouseButtonEventArgs]$mouseInfo
             )
             [void]( Invoke-ExplorerStyleAllSelectedClick -listView $WPFlistViewAzureVMs -mouseInfo $mouseInfo )
+        })
+
+        $WPFlistViewAzureVMs.Add_ContextMenuOpening({
+            Param
+            (
+                [Parameter(Mandatory)][Object]$sender,
+                [Parameter(Mandatory)][System.Windows.Controls.ContextMenuEventArgs]$eventArgs
+            )
+            if( $sender.SelectedItems.Count -eq 0 )
+            {
+                $hitPos = [System.Windows.Input.Mouse]::GetPosition( $sender )
+                $hit    = [System.Windows.Media.VisualTreeHelper]::HitTest( $sender , $hitPos )
+                if( $null -ne $hit )
+                {
+                    $element = $hit.VisualHit
+                    while( $null -ne $element -and $element -isnot [System.Windows.Controls.ListViewItem] )
+                    {
+                        $element = [System.Windows.Media.VisualTreeHelper]::GetParent( $element )
+                    }
+                    if( $null -ne $element -and $null -ne $element.DataContext )
+                    {
+                        $sender.SelectedItem = $element.DataContext
+                    }
+                }
+            }
         })
 
         $WPFlistViewAzureVMs.Add_PreviewMouseDoubleClick({
@@ -7630,6 +8162,16 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
             }    
         })
 
+        $WPFchkboxRdpSigning.Add_Checked({
+            $_.Handled = $true
+            $WPFcomboboxSigningCert.IsEnabled = $WPFcomboboxSigningCert.Items.Count -gt 0
+        })
+
+        $WPFchkboxRdpSigning.Add_Unchecked({
+            $_.Handled = $true
+            $WPFcomboboxSigningCert.IsEnabled = $false
+        })
+
         $mainWindow.Add_Loaded({
             $_.Handled = $true
             if( $_.Source -and $_.Source.WindowState -ieq 'Minimized' )
@@ -7640,6 +8182,27 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
             if( $avd -and $null -ne $WPFtabControl -and $null -ne $WPFtabAzure )
             {
                 $WPFtabControl.SelectedItem = $WPFtabAzure
+            }
+
+            ## Populate code signing certificates for RDP file signing
+            [array]$codeSigningCerts = @( Get-ChildItem -Path Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue | Where-Object { $_.NotAfter -gt (Get-Date) } )
+            if( $codeSigningCerts.Count -gt 0 )
+            {
+                ForEach( $cert in $codeSigningCerts )
+                {
+                    [string]$displayName = if( -Not [string]::IsNullOrEmpty( $cert.FriendlyName ) ) { $cert.FriendlyName } else { $cert.Subject -replace '^CN=' }
+                    $displayName += " (exp: $($cert.NotAfter.ToString('yyyy-MM-dd')))"
+                    $comboItem = New-Object System.Windows.Controls.ComboBoxItem
+                    $comboItem.Content = $displayName
+                    $comboItem.Tag = $cert.Thumbprint
+                    [void]$WPFcomboboxSigningCert.Items.Add( $comboItem )
+                }
+                $WPFcomboboxSigningCert.SelectedIndex = 0
+            }
+            else
+            {
+                $WPFchkboxRdpSigning.IsEnabled = $false
+                $WPFchkboxRdpSigning.ToolTip = 'No valid code signing certificates found in Cert:\CurrentUser\My'
             }
         })
         
@@ -7752,10 +8315,10 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
 New-RemoteSession -rethrow
 
 # SIG # Begin signature block
-# MIIkkgYJKoZIhvcNAQcCoIIkgzCCJH8CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
+# MIIkkwYJKoZIhvcNAQcCoIIkhDCCJIACAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUsFD8CBsivkdXMhE+Xy4nyBeu
-# cXiggh9gMIIFfTCCA2WgAwIBAgIQAdazdTZfIM2RHdcv5fmTZDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU2modC2a74N/VI0Y48gzW6JAX
+# RWyggh9gMIIFfTCCA2WgAwIBAgIQAdazdTZfIM2RHdcv5fmTZDANBgkqhkiG9w0B
 # AQsFADBaMQswCQYDVQQGEwJMVjEZMBcGA1UEChMQRW5WZXJzIEdyb3VwIFNJQTEw
 # MC4GA1UEAxMnR29HZXRTU0wgRzQgQ1MgUlNBNDA5NiBTSEEyNTYgMjAyMiBDQS0x
 # MB4XDTI1MDcyMTAwMDAwMFoXDTI2MDcyMDIzNTk1OVowcTELMAkGA1UEBhMCR0Ix
@@ -7922,30 +8485,30 @@ New-RemoteSession -rethrow
 # 2Yv7roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf4
 # 7CdxVRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxV
 # ZE/rptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT7
-# 5qaL6vdCvHlshtjdNXOCIUjsarfNZzGCBJwwggSYAgEBMG4wWjELMAkGA1UEBhMC
+# 5qaL6vdCvHlshtjdNXOCIUjsarfNZzGCBJ0wggSZAgEBMG4wWjELMAkGA1UEBhMC
 # TFYxGTAXBgNVBAoTEEVuVmVycyBHcm91cCBTSUExMDAuBgNVBAMTJ0dvR2V0U1NM
 # IEc0IENTIFJTQTQwOTYgU0hBMjU2IDIwMjIgQ0EtMQIQAdazdTZfIM2RHdcv5fmT
 # ZDAJBgUrDgMCGgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG
 # 9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIB
-# FTAjBgkqhkiG9w0BCQQxFgQUf1ANA9Dikjj71LdGJwqEtUaiZGIwCwYHKoZIzj0C
-# AQUABGcwZQIxAK9lFAH1hZ+EnF5q8aGFgvrgjR/RpB4UuKdeBQsf7gaUQ9uO8I9z
-# tbXYKfvyZU1jDwIwP0rdvzebJWJCM7z7G/QdXntjhSptZcMHgZQ6Rv3RpwiSYlw9
-# AjGd8H+YLstrNEwXoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTEL
-# MAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhE
-# aWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAy
-# MDI1IENBMQIQCoDvGEuN8QWC0cR2p5V0aDANBglghkgBZQMEAgEFAKBpMBgGCSqG
-# SIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDcwOTA4MDU0
-# NlowLwYJKoZIhvcNAQkEMSIEIDPexjMCAu2A2piznppp0d9PM1Rk9MmVa5JGojIl
-# v6p5MA0GCSqGSIb3DQEBAQUABIICAAuuxPWZmMwsvl5DwDa680qyfG7XMZYXom5J
-# K6Xr+ftAcTuHShql/xg6m3l9S1sZCChBeMxmuju+ZQYPrkdQia8MLgFyp7vV0QbQ
-# b0/0ehb/2JEQRNq15SrHrieMezHTQEagv2rZKYmWNtlEoB96M8eInlPNow5hVsRk
-# Fs0GeOe8p3eBF0STFVVjT+ROFy4y8+Eh08HyxXDD6hz9Hpb/GvP9VsJH1Gdvmn3d
-# VbsHAoM7mHzNlvL4KjbCCP17TyrC8oA+EfLQRCFWiOArHv3rXG2Q5nWCPah3F0xo
-# AnIBJZ7QYl97fhIOXCFOM+U+gHaVpy2rRBTQq8F42otezeWJZ0zKQyOfRd8jdODs
-# 0VgUKmnQEcAq56UvxucWUtzQFU5HYVIL87IuXuM7L/ODedB82BJ9OexkaZ6Lhj+2
-# HDKOLu0tJ5aLbMeQ0SwqCsLkNzM4DRXBYQDL4a9/mi9phb8NQZ4dEyJfnKtdiM67
-# RHktzJlKrB3MkAq3u3a196eGyDQBp15pi5kSDQp22uR73nh9urN/VFRfjUjxfXgd
-# MyzpxXXGhxX3/Tq7K6I5z+QlKbm6YvgtoRIIw01K/tSdHDoZ+wjUVJAKV30jGDMj
-# gK+bX0Fn8R/mHlTJ+jcmUfMQDofdMdhzBeBgRK5OKcf6tKzOwkCalYhFTEDBp7Vf
-# 5kYR0y49
+# FTAjBgkqhkiG9w0BCQQxFgQURrhIlWn7pjbCYoKn0N64och4v7EwCwYHKoZIzj0C
+# AQUABGgwZgIxAIYnwarEmkQqztK72she8rqyFtcudol4yfbGXHPhiz6QFlsKLjo7
+# QBxuzDWHTEGCHAIxALFJcRnxUj/L8Wd2KOR74sjtutuJ4NvIKfxgs+r+Tqt6yMzE
+# 3x0nGpCHKO9FhhfX3aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
+# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
+# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYxNjIz
+# MTdaMC8GCSqGSIb3DQEJBDEiBCBSCcupOHthOorfH0j95kcH9gpwbf/6t1Hl3Lb2
+# m+DbvTANBgkqhkiG9w0BAQEFAASCAgCA3eTpJQXGyyblBbNYvDM38U9XQP+OmTzX
+# dV7VHjxOCey7inRSJRPIGC4tdvCwpSTm9F0qRyq5WZU++VVVSLFqDoS/1LMEGR4e
+# kBlw6F7snHTQn5H01Q60FC/sOhD4cl05CYzylzHmoQI5epdZn0VTUnd75q/ekDEL
+# irJf0ofbMlLbskIOu7WGK3nmx7aeTk/RdQxARuez/JuAEk0ScKLpZSYIHlO0G9vf
+# O6eMuCDJzeV36H33fm9YbevKB9dY5c2sF0AzEADt/p102Y4nOAG4+og43qe2QHR0
+# ODwToTWuIfclyQrqc/pEbYW+rgWF8nLItb9KXhARxCwy8KXl2kPdbVUnxCATwcYC
+# v6PJ//kdeVbhhM2SpsEVmkY7VmQCswBs1KKipieyzOOI0QCUrgUoJHiOazahE7+9
+# sDK+Z0lOkGUIOLyTqtuTdi65fFUqAq/modrMoAvlqD3OrSZXQux6sQh3UY3iOFwh
+# uOdAEInNW0TT29RccV+yuI8XtC+wbj61aQWpUsR05SPPR9lHB+igQqyDxung01F9
+# /oe0ltGbcYcKSOqvL5zBWLxdglEPdULmw+W81MY/rJ0kh7nCoWAGqECRI42TzRen
+# vbH2HB1Ez6KF97igi5LcFxx9eMtiJMKPJx8zQMoUFs7ih3HQla5fu3U0f7XBjYCV
+# G5MDt3uRKw==
 # SIG # End signature block
