@@ -67,6 +67,7 @@
     2026/07/09 @guyrleech  Added OS disk type changing
     2026/07/16 @guyrleech  Added Azure Edit Tags context menu item to view/edit/add/delete VM tags
     2026/07/16 @guyrleech  Added Assigned User column to AVD list view
+    2026/07/17 @guyrleech  Added Application Groups context menu under Host Pool showing apps and assignments in grid view. Added disk type at AZ top level
     
     ## TODO persist the "comment" column in memory so that it is available when undocked and redocked
     ## TODO make hypervisor operations async with a watcher thread
@@ -111,6 +112,7 @@ Param
     [string]$xy , ## colon delimited
     [switch]$avd ,
     [decimal]$longPressSeconds = 1 ,
+    [string]$sessionHostMgmtAPIVersion = '2026-04-01-preview' , ## hopefully will get a released version soon!
     [string]$drivesToRedirect = '*' ,
     [string]$extraMsrdcParameters = '/SkipAvdSignatureChecks' ,
     [string]$msrdcCopyPath ,
@@ -495,6 +497,7 @@ drivestoredirect:s:$drivesToRedirect
                                 <GridViewColumn Header="Created" DisplayMemberBinding="{Binding Created}" />
                                 <GridViewColumn Header="Power State" DisplayMemberBinding="{Binding PowerState}" />
                                 <GridViewColumn Header="Size" DisplayMemberBinding="{Binding Size}" />
+                                <GridViewColumn Header="OS Disk Type" DisplayMemberBinding="{Binding OSDiskType}" />
                             </GridView>
                         </ListView.View>
                         <ListView.ContextMenu>
@@ -515,6 +518,8 @@ drivestoredirect:s:$drivesToRedirect
                                     <MenuItem Header="Reconfigure" x:Name="AzureReconfigureMenu" />
                                     <MenuItem Header="Change Disk Type" x:Name="AzureChangeDiskTypeContextMenu" />
                                     <MenuItem Header="Edit Tags" x:Name="AzureEditTagsContextMenu" />
+                                    <MenuItem Header="Activity Logs" x:Name="AzureVMActivityLogsContextMenu" />
+                                    <MenuItem Header="AVD Logs" x:Name="AzureAVDLogsContextMenu" IsEnabled="False" />
                                 </MenuItem>
                                 <MenuItem Header="Delete" x:Name="AzureDeletionContextMenu">
                                     <MenuItem Header="Delete VM" x:Name="AzureDeleteContextMenu" />
@@ -530,6 +535,12 @@ drivestoredirect:s:$drivesToRedirect
                                     <MenuItem Header="Force Logoff" x:Name="AzureForceLogoffSessionContextMenu" />
                                     <MenuItem Header="Drain Mode On" x:Name="AzureDrainModeOnSessionContextMenu" />
                                     <MenuItem Header="Drain Mode Off" x:Name="AzureDrainModeOffSessionContextMenu" />
+                                </MenuItem>
+                                <MenuItem Header="Host Pool" x:Name="AzureHostPoolContextMenu" IsEnabled="False">
+                                    <MenuItem Header="Detail" x:Name="AzureHostPoolDetailContextMenu" />
+                                    <MenuItem Header="Increase Size" x:Name="AzureChangeHostPoolSizeContextMenu" />
+                                    <MenuItem Header="Activity Logs" x:Name="AzureHostPoolActivityLogsContextMenu" />
+                                    <MenuItem Header="Application Groups" x:Name="AzureAppGroupsContextMenu" />
                                 </MenuItem>
                                 <!-- 
                                 <MenuItem Header="Snapshots" x:Name="AzureSnapshotsContextMenu">
@@ -744,6 +755,279 @@ drivestoredirect:s:$drivesToRedirect
         <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="btnTagsOK" Content="OK" Width="90" Margin="0,0,8,0" Height="32" IsDefault="True"/>
             <Button x:Name="btnTagsCancel" Content="Cancel" Width="90" Height="32" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$hostPoolSizeXAML = @'
+<Window x:Class="WPF_Scratchpad.HostPoolSize"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Change Host Pool Size" Height="240" Width="440" MinHeight="220" MinWidth="340"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Label x:Name="lblHostPoolSizeHeader" Content="" Grid.Row="0" FontWeight="Bold" FontSize="12" Margin="0,0,0,2"/>
+        <Label x:Name="lblHostPoolCurrentSize" Content="" Grid.Row="1" Margin="0,0,0,10"/>
+        <StackPanel Grid.Row="2" Orientation="Horizontal">
+            <Label Content="New instance count:" Width="160" VerticalContentAlignment="Center" Padding="0"/>
+            <TextBox x:Name="txtHostPoolNewSize" Width="90" Height="26" VerticalContentAlignment="Center"/>
+        </StackPanel>
+        <Label x:Name="lblHostPoolSizeError" Content="" Grid.Row="3" Foreground="Red" Margin="0,4,0,0" Height="20" Padding="0"/>
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="btnHostPoolSizeOK" Content="OK" Width="90" Margin="0,0,8,0" Height="32" IsDefault="True" IsEnabled="False"/>
+            <Button x:Name="btnHostPoolSizeCancel" Content="Cancel" Width="90" Height="32" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$hostPoolDetailXAML = @'
+<Window x:Class="WPF_Scratchpad.HostPoolDetail"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Host Pool Detail" Height="520" Width="720" MinHeight="300" MinWidth="500"
+        ResizeMode="CanResize" WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Label x:Name="lblHostPoolDetailHeader" Content="" Grid.Row="0" FontWeight="Bold" FontSize="12" Margin="0,0,0,8"/>
+        <DataGrid x:Name="dgHostPoolDetail" Grid.Row="1"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  CanUserSortColumns="True" CanUserResizeColumns="True"
+                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                  AlternatingRowBackground="#F5F5F5" GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Property" Binding="{Binding Property}" Width="230"/>
+                <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="btnHostPoolDetailClose" Content="Close" Width="90" Height="32" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$hostPoolActivityLogsXAML = @'
+<Window x:Class="WPF_Scratchpad.HostPoolActivityLogs"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Host Pool Activity Logs" Height="600" Width="960" MinHeight="400" MinWidth="600"
+        ResizeMode="CanResize" WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Label x:Name="lblHostPoolActLogsHeader" Content="" Grid.Row="0" FontWeight="Bold" FontSize="12" Margin="0,0,0,4"/>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
+            <Label Content="Go back:" VerticalContentAlignment="Center" Padding="0,0,6,0"/>
+            <TextBox x:Name="txtHostPoolActLogsValue" Width="70" Height="26" VerticalContentAlignment="Center" Text="24"/>
+            <RadioButton x:Name="radHostPoolActLogsHours" Content="Hours" IsChecked="True" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+            <RadioButton x:Name="radHostPoolActLogsDays" Content="Days" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+            <Button x:Name="btnHostPoolActLogsRetrieve" Content="Retrieve" Width="80" Height="26" Margin="16,0,0,0"/>
+        </StackPanel>
+        <Label x:Name="lblHostPoolActLogsStatus" Content="" Grid.Row="2" Foreground="Gray" Margin="0,0,0,4" Padding="0"/>
+        <DataGrid x:Name="dgHostPoolActLogs" Grid.Row="3"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
+                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                  AlternatingRowBackground="#F5F5F5" GridLinesVisibility="Horizontal"
+                  SelectionMode="Extended">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Time"          Binding="{Binding Time}"          Width="140"/>
+                <DataGridTextColumn Header="Caller"        Binding="{Binding Caller}"        Width="200"/>
+                <DataGridTextColumn Header="Operation"     Binding="{Binding Operation}"     Width="240"/>
+                <DataGridTextColumn Header="Status"        Binding="{Binding Status}"        Width="90"/>
+                <DataGridTextColumn Header="Level"         Binding="{Binding Level}"         Width="80"/>
+                <DataGridTextColumn Header="Resource Type" Binding="{Binding ResourceType}"  Width="180"/>
+                <DataGridTextColumn Header="Description"   Binding="{Binding Description}"   Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="btnHostPoolActLogsClose" Content="Close" Width="90" Height="32" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$vmActivityLogsXAML = @'
+<Window x:Class="WPF_Scratchpad.VMActivityLogs"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="VM Activity Logs" Height="600" Width="960" MinHeight="400" MinWidth="600"
+        ResizeMode="CanResize" WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Label x:Name="lblVMActLogsHeader" Content="" Grid.Row="0" FontWeight="Bold" FontSize="12" Margin="0,0,0,4"/>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
+            <Label Content="Go back:" VerticalContentAlignment="Center" Padding="0,0,6,0"/>
+            <TextBox x:Name="txtVMActLogsValue" Width="70" Height="26" VerticalContentAlignment="Center" Text="24"/>
+            <RadioButton x:Name="radVMActLogsHours" Content="Hours" IsChecked="True" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+            <RadioButton x:Name="radVMActLogsDays" Content="Days" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+            <Button x:Name="btnVMActLogsRetrieve" Content="Retrieve" Width="80" Height="26" Margin="16,0,0,0"/>
+        </StackPanel>
+        <Label x:Name="lblVMActLogsStatus" Content="" Grid.Row="2" Foreground="Gray" Margin="0,0,0,4" Padding="0"/>
+        <DataGrid x:Name="dgVMActLogs" Grid.Row="3"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
+                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                  AlternatingRowBackground="#F5F5F5" GridLinesVisibility="Horizontal"
+                  SelectionMode="Extended">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Time"          Binding="{Binding Time}"          Width="140"/>
+                <DataGridTextColumn Header="Caller"        Binding="{Binding Caller}"        Width="200"/>
+                <DataGridTextColumn Header="Operation"     Binding="{Binding Operation}"     Width="240"/>
+                <DataGridTextColumn Header="Status"        Binding="{Binding Status}"        Width="90"/>
+                <DataGridTextColumn Header="Level"         Binding="{Binding Level}"         Width="80"/>
+                <DataGridTextColumn Header="Resource Type" Binding="{Binding ResourceType}"  Width="180"/>
+                <DataGridTextColumn Header="Description"   Binding="{Binding Description}"   Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="btnVMActLogsClose" Content="Close" Width="90" Height="32" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$avdLogsXAML = @'
+<Window x:Class="WPF_Scratchpad.AVDLogs"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="AVD Logs" Height="600" Width="960" MinHeight="400" MinWidth="600"
+        ResizeMode="CanResize" WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Label x:Name="lblAVDLogsHeader" Content="" Grid.Row="0" FontWeight="Bold" FontSize="12" Margin="0,0,0,4"/>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
+            <Label Content="Go back:" VerticalContentAlignment="Center" Padding="0,0,6,0"/>
+            <TextBox x:Name="txtAVDLogsValue" Width="60" Height="26" VerticalContentAlignment="Center" Text="24"/>
+            <RadioButton x:Name="radAVDLogsHours" Content="Hours" IsChecked="True" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+            <RadioButton x:Name="radAVDLogsDays" Content="Days" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+            <Button x:Name="btnAVDLogsRetrieve" Content="Retrieve" Width="80" Height="26" Margin="16,0,0,0"/>
+        </StackPanel>
+        <Label x:Name="lblAVDLogsStatus" Content="" Grid.Row="2" Foreground="Gray" Margin="0,0,0,4" Padding="0"/>
+        <DataGrid x:Name="dgAVDLogs" Grid.Row="3"
+                  AutoGenerateColumns="True" IsReadOnly="True"
+                  CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
+                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                  AlternatingRowBackground="#F5F5F5" GridLinesVisibility="Horizontal"
+                  SelectionMode="Extended"/>
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="btnAVDLogsClose" Content="Close" Width="90" Height="32" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$appGroupsXAML = @'
+<Window x:Class="WPF_Scratchpad.AppGroups"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Application Groups" Height="640" Width="1100" MinHeight="400" MinWidth="700"
+        ResizeMode="CanResize" WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Label x:Name="lblAppGroupsHeader" Content="" Grid.Row="0" FontWeight="Bold" FontSize="12" Margin="0,0,0,4"/>
+        <Label x:Name="lblAppGroupsStatus" Content="" Grid.Row="1" Foreground="Gray" Margin="0,0,0,4" Padding="0"/>
+        <TabControl Grid.Row="2">
+            <TabItem Header="Applications">
+                <DataGrid x:Name="dgAppGroupsApplications"
+                          AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                          AlternatingRowBackground="#F5F5F5" GridLinesVisibility="Horizontal"
+                          SelectionMode="Extended">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="App Group"       Binding="{Binding AppGroup}"       Width="180"/>
+                        <DataGridTextColumn Header="Group Type"      Binding="{Binding GroupType}"      Width="100"/>
+                        <DataGridTextColumn Header="Workspace"       Binding="{Binding Workspace}"      Width="140"/>
+                        <DataGridTextColumn Header="App Name"        Binding="{Binding AppName}"        Width="160"/>
+                        <DataGridTextColumn Header="Display Name"    Binding="{Binding DisplayName}"    Width="160"/>
+                        <DataGridTextColumn Header="Description"     Binding="{Binding Description}"    Width="160"/>
+                        <DataGridTextColumn Header="App Type"        Binding="{Binding AppType}"        Width="90"/>
+                        <DataGridTextColumn Header="Path"            Binding="{Binding FilePath}"       Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+            <TabItem Header="Assignments">
+                <DataGrid x:Name="dgAppGroupsAssignments"
+                          AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                          AlternatingRowBackground="#F5F5F5" GridLinesVisibility="Horizontal"
+                          SelectionMode="Extended">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="App Group"      Binding="{Binding AppGroup}"      Width="180"/>
+                        <DataGridTextColumn Header="Group Type"     Binding="{Binding GroupType}"     Width="100"/>
+                        <DataGridTextColumn Header="Workspace"      Binding="{Binding Workspace}"     Width="140"/>
+                        <DataGridTextColumn Header="Principal"      Binding="{Binding Principal}"     Width="220"/>
+                        <DataGridTextColumn Header="Principal Type" Binding="{Binding PrincipalType}" Width="100"/>
+                        <DataGridTextColumn Header="Role"           Binding="{Binding Role}"           Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="btnAppGroupsClose" Content="Close" Width="90" Height="32" IsCancel="True"/>
         </StackPanel>
     </Grid>
 </Window>
@@ -2485,7 +2769,7 @@ Function Get-DisplayInfo
     Write-Verbose -Message "Got $($Screens.Count) screens"
 
     ## https://rakhesh.com/powershell/powershell-snippet-to-get-the-name-of-each-attached-monitor/
-    [array]$monitors = @()
+    [array]$monitors = @( Get-CimInstance -ClassName WmiMonitorID -Namespace root\wmi )
 
     try
     {
@@ -2519,7 +2803,7 @@ Function Get-DisplayInfo
                             [string]$manufacturerCode = $Matches[1]
                             if( $monitor = $monitors | Where-Object InstanceName -Match "^DISPLAY\\$manufacturerCode\\" )
                             {
-                                [string]$manufacturerCode = [System.Text.Encoding]::ASCII.GetString( $monitor.ManufacturerName )
+                                [string]$manufacturerCode = [System.Text.Encoding]::ASCII.GetString( $monitor.ManufacturerName ).Trim([char]0)
                                 [string]$manufacturer = $ManufacturerHash[ $manufacturerCode ] 
                                 if( [string]::IsNullOrEmpty( $manufacturer ) )
                                 {
@@ -2806,6 +3090,15 @@ Function Add-AzureVMsToListView
 
         if( $azureError ) { throw "Error retrieving VMs: $($azureError | Select-Object -First 1)" }
 
+        # Build disk SKU lookup (list API does not return StorageAccountType; must fetch from disks)
+        [hashtable]$diskSkuById = @{}
+        Get-AzDisk | ForEach-Object {
+            if( -Not [string]::IsNullOrWhiteSpace( $_.Id ) )
+            {
+                $diskSkuById[ $_.Id.ToLowerInvariant() ] = $_.Sku.Name
+            }
+        }
+
         # Get tenant
         $tenant = Get-AZTenant
         $tenantDisplay = if( $null -ne $tenant ) { "{0} ({1})" -f $tenant.Name, $tenant.DefaultDomain } else { '' }
@@ -2905,6 +3198,7 @@ Function Add-AzureVMsToListView
                 Location = $vm.Location
                 ResourceGroup = $vm.ResourceGroupName
                 Size = $vm.HardwareProfile.VmSize
+                OSDiskType = if( $null -ne $vm.StorageProfile.OsDisk.ManagedDisk.Id ) { $diskSkuById[ $vm.StorageProfile.OsDisk.ManagedDisk.Id.ToLowerInvariant() ] } else { 'Unmanaged' }
                 Subscription = ($subscriptions | Where-Object Id -eq $subscriptionId | Select-Object -ExpandProperty Name)
                 SubscriptionId = $subscriptionId
                 Created = $vm.TimeCreated
@@ -2959,6 +3253,7 @@ Function Add-AzureVMsToListView
                 Location = $item.Location
                 ResourceGroup = $item.ResourceGroup
                 Size = $item.Size
+                OSDiskType = $item.OSDiskType
                 Subscription = $item.Subscription
                 SubscriptionId = $item.SubscriptionId
                 Created = $item.Created
@@ -3074,6 +3369,16 @@ Function Set-AzureSessionMenuState
     if( $null -ne $WPFAzureDeleteSessionHostAndVMContextMenu )
     {
         $WPFAzureDeleteSessionHostAndVMContextMenu.IsEnabled = $avdEnabled
+    }
+
+    if( $null -ne $WPFAzureHostPoolContextMenu )
+    {
+        $WPFAzureHostPoolContextMenu.IsEnabled = $avdEnabled
+    }
+
+    if( $null -ne $WPFAzureAVDLogsContextMenu )
+    {
+        $WPFAzureAVDLogsContextMenu.IsEnabled = $avdEnabled
     }
 }
 
@@ -5576,7 +5881,7 @@ Function Process-Action
                     continue
                 }
 
-                if( $Operation -match 'PowerOn|Detail|Resume|Clipboard|TakeSnapshot|MessageSession|OpenInPortal|ChangeDiskType|EditTags|((Manage|Revert|Delete).*Snapshot)' ) ## don't need to prompt or will prompt with more information later
+                if( $Operation -match 'PowerOn|Detail|Resume|Clipboard|TakeSnapshot|MessageSession|OpenInPortal|ChangeDiskType|EditTags|ChangeHostPoolSize|HostPoolDetail|HostPoolActivityLogs|VMActivityLogs|AVDLogs|AppGroups|((Manage|Revert|Delete).*Snapshot)' ) ## don't need to prompt or will prompt with more information later
                 {
                     $answer = 'yes'
                 }
@@ -5748,6 +6053,743 @@ Function Process-Action
                         Write-Warning -Message "Change disk type error for $($selection.Name): $($_.Exception.Message)"
                         [void][Windows.MessageBox]::Show( $mainWindow , "Change disk type failed for $($selection.Name)`n$($_.Exception.Message)" , 'Change Disk Type' , 'Ok' , 'Error' )
                     }
+                }
+                elseif( $operation -ieq 'Azure_ChangeHostPoolSize' )
+                {
+                    try
+                    {
+                        Import-Module -Name Az.DesktopVirtualization -Verbose:$false
+
+                        # Validate: all selected VMs must be in the same host pool
+                        [array]$distinctHostPools = @( $selectedVMs | Where-Object { -not [string]::IsNullOrWhiteSpace( $_.HostPool ) } | Select-Object -ExpandProperty HostPool -Unique )
+
+                        if( $distinctHostPools.Count -eq 0 )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , 'None of the selected VMs have an associated AVD host pool.' , 'Change Host Pool Size' , 'Ok' , 'Warning' )
+                        }
+                        elseif( $distinctHostPools.Count -gt 1 )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "Selected VMs span $($distinctHostPools.Count) host pools: $($distinctHostPools -join ', ').`nPlease select VMs from a single host pool only." , 'Change Host Pool Size' , 'Ok' , 'Warning' )
+                        }
+                        else
+                        {
+                            [string]$hostPoolName = $distinctHostPools[0]
+
+                            # Look up host pool resource ID directly (not relying on the cached lookup table)
+                            $hostPoolObject = $null
+                            $hostPoolObject = Get-AzWvdHostPool -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $hostPoolName } | Select-Object -First 1
+                            [string]$hostPoolId = if( $null -ne $hostPoolObject ) { $hostPoolObject.Id } else { $null }
+
+                            if( [string]::IsNullOrWhiteSpace( $hostPoolId ) )
+                            {
+                                [void][Windows.MessageBox]::Show( $mainWindow , "Could not resolve resource ID for host pool '$hostPoolName'." , 'Change Host Pool Size' , 'Ok' , 'Error' )
+                            }
+                            else
+                            {
+                                [string]$shmPath = "$hostPoolId/sessionHostManagements/default?api-version=$sessionHostMgmtAPIVersion"
+                                $shmResponse = $null
+                                $shmResponse  = Invoke-AzRestMethod -Method GET -Path $shmPath -ErrorAction Stop
+
+                                if( $shmResponse.StatusCode -notin @( 200 , 201 ) )
+                                {
+                                    [string]$errMsg = $shmResponse.Content
+                                    try { $errMsg = ( $shmResponse.Content | ConvertFrom-Json ).error.message } catch {}
+                                    [void][Windows.MessageBox]::Show( $mainWindow , "Host pool '$hostPoolName' does not use Session Host Configuration or the API is unavailable.`nStatus: $($shmResponse.StatusCode)`n$errMsg" , 'Change Host Pool Size' , 'Ok' , 'Warning' )
+                                }
+                                else
+                                {
+                                    $shmJson = $shmResponse.Content | ConvertFrom-Json
+
+                                    if( $null -eq $shmJson.properties -or $null -eq $shmJson.properties.provisioning )
+                                    {
+                                        [void][Windows.MessageBox]::Show( $mainWindow , "Host pool '$hostPoolName' does not have a session host provisioning configuration.`nSession Host Configuration must be enabled on the host pool to use this feature." , 'Change Host Pool Size' , 'Ok' , 'Warning' )
+                                    }
+                                    else
+                                    {
+                                        [int]$currentCount = [int]$shmJson.properties.provisioning.instanceCount
+
+                                        if( $hostPoolSizeWindow = New-WPFWindow -inputXAML $hostPoolSizeXAML )
+                                        {
+                                            $hostPoolSizeWindow.Owner = $mainWindow
+                                            $WPFlblHostPoolSizeHeader.Content   = "Host Pool: $hostPoolName"
+                                            $WPFlblHostPoolCurrentSize.Content  = "Current instance count: $currentCount"
+                                            $WPFtxtHostPoolNewSize.Text         = ''
+                                            $WPFlblHostPoolSizeError.Content    = ''
+                                            $WPFbtnHostPoolSizeOK.IsEnabled     = $false
+
+                                            $WPFtxtHostPoolNewSize.Add_TextChanged({
+                                                [string]$txt = $WPFtxtHostPoolNewSize.Text.Trim()
+                                                $WPFbtnHostPoolSizeOK.IsEnabled     = $false
+                                                $WPFlblHostPoolSizeError.Content    = ''
+                                                if( $txt -match '^\d+$' )
+                                                {
+                                                    [int]$v = [int]$txt
+                                                    if( $v -le 0 )
+                                                    {
+                                                        $WPFlblHostPoolSizeError.Content = 'Value must be a positive integer.'
+                                                    }
+                                                    elseif( $v -le $currentCount )
+                                                    {
+                                                        $WPFlblHostPoolSizeError.Content = "New value must be greater than the current count ($currentCount)."
+                                                    }
+                                                    else
+                                                    {
+                                                        $WPFbtnHostPoolSizeOK.IsEnabled = $true
+                                                    }
+                                                }
+                                                elseif( $txt.Length -gt 0 )
+                                                {
+                                                    $WPFlblHostPoolSizeError.Content = 'Please enter a positive whole number.'
+                                                }
+                                            })
+
+                                            $WPFbtnHostPoolSizeOK.Add_Click({
+                                                $_.Handled = $true
+                                                $hostPoolSizeWindow.DialogResult = $true
+                                                $hostPoolSizeWindow.Close()
+                                            })
+
+                                            if( $hostPoolSizeWindow.ShowDialog() )
+                                            {
+                                                [int]$newCount      = [int]$WPFtxtHostPoolNewSize.Text.Trim()
+                                                [string]$confirmMsg = "Grow host pool '$hostPoolName' from $currentCount to $newCount instance(s)?`n`nThis will provision $($newCount - $currentCount) additional session host(s)."
+
+                                                if( [Windows.MessageBox]::Show( $mainWindow , $confirmMsg , 'Confirm Host Pool Resize' , 'YesNo' , 'Question' ) -ieq 'Yes' )
+                                                {
+                                                    $shmJson.properties.provisioning.instanceCount = $newCount
+                                                    [string]$putBody   = $shmJson | ConvertTo-Json -Depth 10 -Compress
+                                                    $putResponse       = $null
+                                                    $putResponse       = Invoke-AzRestMethod -Method PUT -Path $shmPath -Payload $putBody -ErrorAction Stop
+
+                                                    if( $putResponse.StatusCode -in @( 200 , 201 , 202 ) )
+                                                    {
+                                                        Write-Host "Host pool '$hostPoolName' resize initiated: $currentCount -> $newCount" -ForegroundColor Green
+                                                        [void][Windows.MessageBox]::Show( $mainWindow , "Host pool '$hostPoolName' resize from $currentCount to $newCount instance(s) initiated successfully." , 'Change Host Pool Size' , 'Ok' , 'Information' )
+                                                    }
+                                                    else
+                                                    {
+                                                        [string]$errDetail = $putResponse.Content
+                                                        try { $errDetail = ( $putResponse.Content | ConvertFrom-Json ).error.message } catch {}
+                                                        Write-Warning -Message "Host pool '$hostPoolName' resize failed: $errDetail"
+                                                        [void][Windows.MessageBox]::Show( $mainWindow , "Host pool resize failed for '$hostPoolName'.`nStatus: $($putResponse.StatusCode)`n$errDetail" , 'Change Host Pool Size' , 'Ok' , 'Error' )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "Change host pool size error: $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "Change host pool size failed.`n$($_.Exception.Message)" , 'Change Host Pool Size' , 'Ok' , 'Error' )
+                    }
+                    break  # operation applies to the whole selection, not per VM
+                }
+                elseif( $operation -ieq 'Azure_HostPoolDetail' )
+                {
+                    try
+                    {
+                        Import-Module -Name Az.DesktopVirtualization -Verbose:$false
+
+                        [string]$hostPoolName = $selection.HostPool
+                        if( [string]::IsNullOrWhiteSpace( $hostPoolName ) )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "VM '$($selection.Name)' is not associated with an AVD host pool." , 'Host Pool Detail' , 'Ok' , 'Warning' )
+                        }
+                        else
+                        {
+                            $hostPoolObject = $null
+                            $hostPoolObject = Get-AzWvdHostPool -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $hostPoolName } | Select-Object -First 1
+
+                            if( $null -eq $hostPoolObject )
+                            {
+                                [void][Windows.MessageBox]::Show( $mainWindow , "Could not find host pool '$hostPoolName'." , 'Host Pool Detail' , 'Ok' , 'Error' )
+                            }
+                            else
+                            {
+                                [string]$hostPoolRg = ($hostPoolObject.Id -split '/')[4]
+
+                                [array]$sessionHosts        = @( Get-AzWvdSessionHost -HostPoolName $hostPoolName -ResourceGroupName $hostPoolRg -ErrorAction SilentlyContinue )
+                                [int]$totalSessionHosts     = $sessionHosts.Count
+                                [int]$availableSessionHosts = @( $sessionHosts | Where-Object { $_.Status -ieq 'Available' -and $_.AllowNewSession -eq $true } ).Count
+                                [int]$totalSessions         = [int]( $sessionHosts | Measure-Object -Property Session -Sum ).Sum
+                                [int]$maxSessions           = $hostPoolObject.MaxSessionLimit * $totalSessionHosts
+                                [int]$availableSessions     = [Math]::Max( 0 , $maxSessions - $totalSessions )
+
+                                [array]$appGroups          = @( Get-AzWvdApplicationGroup -ErrorAction SilentlyContinue | Where-Object { $_.HostPoolArmPath -ieq $hostPoolObject.Id } )
+                                [int]$appGroupTotal        = $appGroups.Count
+                                [int]$appGroupRemoteApp    = @( $appGroups | Where-Object { $_.ApplicationGroupType -ieq 'RemoteApp' } ).Count
+
+                                [hashtable]$appGroupIdSet  = @{}
+                                foreach( $ag in $appGroups ) { if( $ag.Id ) { $appGroupIdSet[ $ag.Id.ToLowerInvariant() ] = $true } }
+                                [array]$linkedWorkspaces   = @(
+                                    Get-AzWvdWorkspace -ErrorAction SilentlyContinue | Where-Object {
+                                        $_.ApplicationGroupReference | Where-Object { $appGroupIdSet.ContainsKey( $_.ToLowerInvariant() ) }
+                                    } | ForEach-Object { if( -not [string]::IsNullOrWhiteSpace( $_.FriendlyName ) ) { $_.FriendlyName } else { $_.Name } }
+                                )
+                                [string]$workspaceList     = if( $linkedWorkspaces.Count -gt 0 ) { $linkedWorkspaces -join '; ' } else { '(none)' }
+
+                                [array]$rawProps = @(
+                                    @{ Property = 'Name'                         ; Value = $hostPoolObject.Name }
+                                    @{ Property = 'Location'                     ; Value = $hostPoolObject.Location }
+                                    @{ Property = 'Resource Group'               ; Value = $hostPoolRg }
+                                    @{ Property = 'Friendly Name'                ; Value = $hostPoolObject.FriendlyName }
+                                    @{ Property = 'Description'                  ; Value = $hostPoolObject.Description }
+                                    @{ Property = 'Host Pool Type'               ; Value = $hostPoolObject.HostPoolType }
+                                    @{ Property = 'Load Balancer Type'           ; Value = $hostPoolObject.LoadBalancerType }
+                                    @{ Property = 'Max Session Limit'            ; Value = $hostPoolObject.MaxSessionLimit }
+                                    @{ Property = 'Session Hosts (Total)'        ; Value = $totalSessionHosts }
+                                    @{ Property = 'Session Hosts (Available)'    ; Value = $availableSessionHosts }
+                                    @{ Property = 'Current Sessions'             ; Value = $totalSessions }
+                                    @{ Property = 'Available Sessions'           ; Value = $availableSessions }
+                                    @{ Property = 'Application Groups (Total)'   ; Value = $appGroupTotal }
+                                    @{ Property = 'Application Groups (RemoteApp)'; Value = $appGroupRemoteApp }
+                                    @{ Property = 'Linked Workspaces'            ; Value = $workspaceList }
+                                    @{ Property = 'Personal Desktop Assignment'  ; Value = $hostPoolObject.PersonalDesktopAssignmentType }
+                                    @{ Property = 'Preferred App Group Type'     ; Value = $hostPoolObject.PreferredAppGroupType }
+                                    @{ Property = 'Validation Environment'       ; Value = $hostPoolObject.ValidationEnvironment }
+                                    @{ Property = 'Start VM on Connect'          ; Value = $hostPoolObject.StartVMOnConnect }
+                                    @{ Property = 'Registration Expiry'          ; Value = if( $hostPoolObject.RegistrationInfoExpirationTime ) { $hostPoolObject.RegistrationInfoExpirationTime.ToString('g') } else { '' } }
+                                    @{ Property = 'Custom RDP Property'          ; Value = $hostPoolObject.CustomRdpProperty }
+                                    @{ Property = 'SSO Client ID'                ; Value = $hostPoolObject.SsoClientId }
+                                    @{ Property = 'Tags'                         ; Value = if( $hostPoolObject.Tag ) { ($hostPoolObject.Tag.Keys | Sort-Object | ForEach-Object { "$_=$($hostPoolObject.Tag[$_])" }) -join '; ' } else { '' } }
+                                    @{ Property = 'Resource ID'                  ; Value = $hostPoolObject.Id }
+                                )
+
+                                if( $hostPoolDetailWindow = New-WPFWindow -inputXAML $hostPoolDetailXAML )
+                                {
+                                    $hostPoolDetailWindow.Owner = $mainWindow
+                                    $WPFlblHostPoolDetailHeader.Content = "Host Pool: $hostPoolName"
+
+                                    $dt = [System.Data.DataTable]::new()
+                                    [void]$dt.Columns.Add( 'Property' )
+                                    [void]$dt.Columns.Add( 'Value' )
+                                    foreach( $p in ( $rawProps | Where-Object { -not [string]::IsNullOrWhiteSpace( $_.Value ) } ) )
+                                    {
+                                        $dr = $dt.NewRow()
+                                        $dr['Property'] = $p.Property
+                                        $dr['Value']    = [string]$p.Value
+                                        [void]$dt.Rows.Add( $dr )
+                                    }
+                                    $WPFdgHostPoolDetail.ItemsSource = $dt.DefaultView
+                                    [void]$hostPoolDetailWindow.ShowDialog()
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "Host Pool Detail error: $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "Host Pool Detail failed.`n$($_.Exception.Message)" , 'Host Pool Detail' , 'Ok' , 'Error' )
+                    }
+                    break  # single selection operation
+                }
+                elseif( $operation -ieq 'Azure_HostPoolActivityLogs' )
+                {
+                    try
+                    {
+                        Import-Module -Name Az.DesktopVirtualization -Verbose:$false
+                        Import-Module -Name Az.Monitor               -Verbose:$false
+
+                        [string]$hostPoolName = $selection.HostPool
+                        if( [string]::IsNullOrWhiteSpace( $hostPoolName ) )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "VM '$($selection.Name)' is not associated with an AVD host pool." , 'Host Pool Activity Logs' , 'Ok' , 'Warning' )
+                        }
+                        else
+                        {
+                            $hostPoolObject = $null
+                            $hostPoolObject = Get-AzWvdHostPool -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $hostPoolName } | Select-Object -First 1
+
+                            if( $null -eq $hostPoolObject )
+                            {
+                                [void][Windows.MessageBox]::Show( $mainWindow , "Could not find host pool '$hostPoolName'." , 'Host Pool Activity Logs' , 'Ok' , 'Error' )
+                            }
+                            else
+                            {
+                                [string]$capturedHostPoolId   = $hostPoolObject.Id
+                                [string]$capturedHostPoolName = $hostPoolName
+
+                                if( $hostPoolActLogsWindow = New-WPFWindow -inputXAML $hostPoolActivityLogsXAML )
+                                {
+                                    $hostPoolActLogsWindow.Owner = $mainWindow
+                                    $WPFlblHostPoolActLogsHeader.Content = "Activity Logs: $capturedHostPoolName"
+
+                                    $WPFbtnHostPoolActLogsRetrieve.Add_Click({
+                                        [string]$valStr = $WPFtxtHostPoolActLogsValue.Text.Trim()
+                                        if( $valStr -notmatch '^\d+(\.\d+)?$' -or [double]$valStr -le 0 )
+                                        {
+                                            $WPFlblHostPoolActLogsStatus.Foreground = [System.Windows.Media.Brushes]::Red
+                                            $WPFlblHostPoolActLogsStatus.Content    = 'Please enter a positive number (e.g. 2 or 1.5).'
+                                            return
+                                        }
+
+                                        [double]$timeVal   = [double]$valStr
+                                        [TimeSpan]$span    = if( $WPFradHostPoolActLogsHours.IsChecked ) { [TimeSpan]::FromHours( $timeVal ) } else { [TimeSpan]::FromDays( $timeVal ) }
+                                        [datetime]$startDT = (Get-Date) - $span
+
+                                        $WPFlblHostPoolActLogsStatus.Foreground = [System.Windows.Media.Brushes]::Gray
+                                        $WPFlblHostPoolActLogsStatus.Content    = 'Retrieving...'
+                                        $WPFdgHostPoolActLogs.ItemsSource       = $null
+                                        $hostPoolActLogsWindow.Dispatcher.Invoke( [System.Windows.Threading.DispatcherPriority]::Background , [action]{} )
+
+                                        try
+                                        {
+                                            [array]$logEntries = @( Get-AzActivityLog -ResourceId $capturedHostPoolId -StartTime $startDT -EndTime (Get-Date) -WarningAction SilentlyContinue -ErrorAction Stop | Sort-Object -Property EventTimestamp )
+
+                                            if( $logEntries.Count -eq 0 )
+                                            {
+                                                $WPFlblHostPoolActLogsStatus.Content = 'No activity log entries found for the specified time range.'
+                                            }
+                                            else
+                                            {
+                                                $dt = [System.Data.DataTable]::new()
+                                                [void]$dt.Columns.Add( 'Time' )
+                                                [void]$dt.Columns.Add( 'Caller' )
+                                                [void]$dt.Columns.Add( 'Operation' )
+                                                [void]$dt.Columns.Add( 'Status' )
+                                                [void]$dt.Columns.Add( 'Level' )
+                                                [void]$dt.Columns.Add( 'ResourceType' )
+                                                [void]$dt.Columns.Add( 'Description' )
+                                                # Resolve a field that may be a plain string, a LocalizableString, or null
+                                                $resolveActVal = {
+                                                    param( $v )
+                                                    if( $null -eq $v )    { return '' }
+                                                    if( $v -is [string] ) { return $v }
+                                                    $lp = $v.PSObject.Properties.Item( 'LocalizedValue' )
+                                                    if( $null -ne $lp -and -not [string]::IsNullOrEmpty( $lp.Value ) ) { return [string]$lp.Value }
+                                                    $vp = $v.PSObject.Properties.Item( 'Value' )
+                                                    if( $null -ne $vp -and -not [string]::IsNullOrEmpty( [string]$vp.Value ) ) { return [string]$vp.Value }
+                                                    return ''
+                                                }
+                                                foreach( $entry in $logEntries )
+                                                {
+                                                    $dr = $dt.NewRow()
+                                                    $dr['Time']         = $entry.EventTimestamp.ToLocalTime().ToString('g')
+                                                    $dr['Caller']       = [string]$entry.Caller
+                                                    $dr['Operation']    = & $resolveActVal $entry.OperationName
+                                                    $dr['Status']       = & $resolveActVal $entry.Status
+                                                    $dr['Level']        = [string]$entry.Level
+                                                    $dr['ResourceType'] = & $resolveActVal $entry.ResourceType
+                                                    $dr['Description']  = [string]$entry.Description
+                                                    [void]$dt.Rows.Add( $dr )
+                                                }
+                                                $WPFdgHostPoolActLogs.ItemsSource    = $dt.DefaultView
+                                                $WPFlblHostPoolActLogsStatus.Content = "$($logEntries.Count) entries  (oldest first)"
+                                            }
+                                        }
+                                        catch
+                                        {
+                                            $WPFlblHostPoolActLogsStatus.Foreground = [System.Windows.Media.Brushes]::Red
+                                            $WPFlblHostPoolActLogsStatus.Content    = "Retrieval failed: $($_.Exception.Message)"
+                                        }
+                                    })
+
+                                    [void]$hostPoolActLogsWindow.ShowDialog()
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "Host Pool Activity Logs error: $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "Host Pool Activity Logs failed.`n$($_.Exception.Message)" , 'Host Pool Activity Logs' , 'Ok' , 'Error' )
+                    }
+                    break  # single selection operation
+                }
+                elseif( $operation -ieq 'Azure_AVDLogs' )
+                {
+                    try
+                    {
+                        Import-Module -Name Az.DesktopVirtualization -Verbose:$false
+                        Import-Module -Name Az.Monitor               -Verbose:$false
+                        Import-Module -Name Az.OperationalInsights   -Verbose:$false
+
+                        [string]$hostPoolName = $selection.HostPool
+                        if( [string]::IsNullOrWhiteSpace( $hostPoolName ) )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "VM '$($selection.Name)' is not associated with an AVD host pool." , 'AVD Logs' , 'Ok' , 'Warning' )
+                        }
+                        else
+                        {
+                            # Resolve host pool ARM resource ID
+                            $hostPoolObject = $null
+                            $hostPoolObject = Get-AzWvdHostPool -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $hostPoolName } | Select-Object -First 1
+
+                            if( $null -eq $hostPoolObject )
+                            {
+                                [void][Windows.MessageBox]::Show( $mainWindow , "Could not find host pool '$hostPoolName'." , 'AVD Logs' , 'Ok' , 'Error' )
+                            }
+                            else
+                            {
+                                # Find Log Analytics workspace via host pool diagnostic settings
+                                [string]$workspaceResourceId = $null
+                                $diagSettings = $null
+                                $diagSettings = Get-AzDiagnosticSetting -ResourceId $hostPoolObject.Id -ErrorAction SilentlyContinue
+                                foreach( $ds in $diagSettings )
+                                {
+                                    if( -not [string]::IsNullOrWhiteSpace( $ds.WorkspaceId ) )
+                                    {
+                                        $workspaceResourceId = $ds.WorkspaceId
+                                        break
+                                    }
+                                }
+
+                                if( [string]::IsNullOrWhiteSpace( $workspaceResourceId ) )
+                                {
+                                    [void][Windows.MessageBox]::Show( $mainWindow , "No Log Analytics workspace is configured in the diagnostic settings for host pool '$hostPoolName'.`nEnable diagnostics on the host pool and direct logs to a Log Analytics workspace first." , 'AVD Logs' , 'Ok' , 'Warning' )
+                                }
+                                else
+                                {
+                                    [string]$wsName = ($workspaceResourceId -split '/')[-1]
+                                    [string]$wsRg   = ($workspaceResourceId -split '/')[4]
+                                    $wsObject = $null
+                                    $wsObject = Get-AzOperationalInsightsWorkspace -ResourceGroupName $wsRg -Name $wsName -ErrorAction Stop
+                                    [string]$capturedWsId   = $wsObject.CustomerId.ToString()
+                                    [string]$capturedVMName = $selection.Name
+
+                                    if( $avdLogsWindow = New-WPFWindow -inputXAML $avdLogsXAML )
+                                    {
+                                        $avdLogsWindow.Owner = $mainWindow
+                                        $WPFlblAVDLogsHeader.Content = "AVD Logs: $capturedVMName   (Host Pool: $hostPoolName)"
+
+                                        $WPFbtnAVDLogsRetrieve.Add_Click({
+                                            [string]$valStr = $WPFtxtAVDLogsValue.Text.Trim()
+                                            if( $valStr -notmatch '^\d+$' -or [int]$valStr -le 0 )
+                                            {
+                                                $WPFlblAVDLogsStatus.Foreground = [System.Windows.Media.Brushes]::Red
+                                                $WPFlblAVDLogsStatus.Content    = 'Please enter a positive whole number.'
+                                                return
+                                            }
+
+                                            [int]$timeVal    = [int]$valStr
+                                            [string]$unit    = if( $WPFradAVDLogsHours.IsChecked ) { 'h' } else { 'd' }
+                                            [string]$agoExpr = "ago(${timeVal}${unit})"
+
+                                            $WPFlblAVDLogsStatus.Foreground = [System.Windows.Media.Brushes]::Gray
+                                            $WPFlblAVDLogsStatus.Content    = 'Retrieving...'
+                                            $WPFdgAVDLogs.ItemsSource       = $null
+                                            $avdLogsWindow.Dispatcher.Invoke( [System.Windows.Threading.DispatcherPriority]::Background , [action]{} )
+
+                                            [string]$kql = @"
+union isfuzzy=true WVDConnections, WVDErrors, WVDCheckpoints, WVDManagement, WVDHostRegistrations, WVDAgentHealthStatus
+| where TimeGenerated >= $agoExpr
+| where SessionHostName has `"$capturedVMName`" or SessionHost has `"$capturedVMName`" or _ResourceId has `"$capturedVMName`"
+| sort by TimeGenerated asc
+| project-away TenantId, SourceSystem, _ResourceId, _SubscriptionId, ResourceId, _IsBillable, Computer, MG
+"@
+
+                                            try
+                                            {
+                                                $qResult = Invoke-AzOperationalInsightsQuery -WorkspaceId $capturedWsId -Query $kql -ErrorAction Stop
+                                                [array]$rows = @( $qResult.Results )
+                                                if( $rows.Count -eq 0 )
+                                                {
+                                                    $WPFlblAVDLogsStatus.Content = 'No log entries found for the specified time range.'
+                                                }
+                                                else
+                                                {
+                                                    # Convert PSObjects to DataTable for reliable DataGrid binding
+                                                    $dt = [System.Data.DataTable]::new()
+                                                    foreach( $prop in $rows[0].PSObject.Properties )
+                                                    {
+                                                        [void]$dt.Columns.Add( $prop.Name )
+                                                    }
+                                                    foreach( $row in $rows )
+                                                    {
+                                                        $dr = $dt.NewRow()
+                                                        foreach( $prop in $row.PSObject.Properties )
+                                                        {
+                                                            $dr[ $prop.Name ] = if( $null -ne $prop.Value ) { $prop.Value } else { [DBNull]::Value }
+                                                        }
+                                                        [void]$dt.Rows.Add( $dr )
+                                                    }
+                                                    $WPFdgAVDLogs.ItemsSource    = $dt.DefaultView
+                                                    $WPFlblAVDLogsStatus.Content = "$($rows.Count) log entries  (oldest first)"
+                                                }
+                                            }
+                                            catch
+                                            {
+                                                $WPFlblAVDLogsStatus.Foreground = [System.Windows.Media.Brushes]::Red
+                                                $WPFlblAVDLogsStatus.Content    = "Query failed: $($_.Exception.Message)"
+                                            }
+                                        })
+
+                                        [void]$avdLogsWindow.ShowDialog()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "AVD Logs error: $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "AVD Logs failed.`n$($_.Exception.Message)" , 'AVD Logs' , 'Ok' , 'Error' )
+                    }
+                    break  # single VM operation
+                }
+                elseif( $operation -ieq 'Azure_AppGroups' )
+                {
+                    try
+                    {
+                        Import-Module -Name Az.DesktopVirtualization -Verbose:$false
+                        Import-Module -Name Az.Resources            -Verbose:$false
+
+                        [string]$hostPoolName = $selection.HostPool
+                        if( [string]::IsNullOrWhiteSpace( $hostPoolName ) )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "VM '$($selection.Name)' is not associated with an AVD host pool." , 'Application Groups' , 'Ok' , 'Warning' )
+                        }
+                        else
+                        {
+                            $hostPoolObject = Get-AzWvdHostPool -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $hostPoolName } | Select-Object -First 1
+
+                            if( $null -eq $hostPoolObject )
+                            {
+                                [void][Windows.MessageBox]::Show( $mainWindow , "Could not find host pool '$hostPoolName'." , 'Application Groups' , 'Ok' , 'Error' )
+                            }
+                            else
+                            {
+                                [array]$appGroups = @( Get-AzWvdApplicationGroup -ErrorAction SilentlyContinue | Where-Object { $_.HostPoolArmPath -ieq $hostPoolObject.Id } )
+
+                                # Build workspace lookup
+                                [hashtable]$wsLookup = @{}
+                                Get-AzWvdWorkspace -ErrorAction SilentlyContinue | ForEach-Object {
+                                    [string]$wsName = if( -not [string]::IsNullOrWhiteSpace( $_.FriendlyName ) ) { $_.FriendlyName } else { $_.Name }
+                                    foreach( $ref in @( $_.ApplicationGroupReference ) )
+                                    {
+                                        if( -not [string]::IsNullOrWhiteSpace( $ref ) )
+                                        {
+                                            $wsLookup[ $ref.ToLowerInvariant() ] = $wsName
+                                        }
+                                    }
+                                }
+
+                                $dtApps = [System.Data.DataTable]::new()
+                                [void]$dtApps.Columns.Add( 'AppGroup' )
+                                [void]$dtApps.Columns.Add( 'GroupType' )
+                                [void]$dtApps.Columns.Add( 'Workspace' )
+                                [void]$dtApps.Columns.Add( 'AppName' )
+                                [void]$dtApps.Columns.Add( 'DisplayName' )
+                                [void]$dtApps.Columns.Add( 'Description' )
+                                [void]$dtApps.Columns.Add( 'AppType' )
+                                [void]$dtApps.Columns.Add( 'FilePath' )
+
+                                $dtAssign = [System.Data.DataTable]::new()
+                                [void]$dtAssign.Columns.Add( 'AppGroup' )
+                                [void]$dtAssign.Columns.Add( 'GroupType' )
+                                [void]$dtAssign.Columns.Add( 'Workspace' )
+                                [void]$dtAssign.Columns.Add( 'Principal' )
+                                [void]$dtAssign.Columns.Add( 'PrincipalType' )
+                                [void]$dtAssign.Columns.Add( 'Role' )
+
+                                foreach( $ag in $appGroups )
+                                {
+                                    [string]$agRg        = ($ag.Id -split '/')[4]
+                                    [string]$agType      = $ag.ApplicationGroupType
+                                    [string]$agWorkspace = $wsLookup[ $ag.Id.ToLowerInvariant() ]
+                                    if( [string]::IsNullOrWhiteSpace( $agWorkspace ) ) { $agWorkspace = '' }
+
+                                    # Applications
+                                    if( $agType -ieq 'RemoteApp' )
+                                    {
+                                        [array]$apps = @( Get-AzWvdApplication -ResourceGroupName $agRg -ApplicationGroupName $ag.Name -ErrorAction SilentlyContinue )
+                                        if( $apps.Count -eq 0 )
+                                        {
+                                            $dr = $dtApps.NewRow()
+                                            $dr['AppGroup']    = $ag.Name
+                                            $dr['GroupType']   = $agType
+                                            $dr['Workspace']   = $agWorkspace
+                                            $dr['AppName']     = '(no applications)'
+                                            $dr['DisplayName'] = ''
+                                            $dr['Description'] = ''
+                                            $dr['AppType']     = ''
+                                            $dr['FilePath']    = ''
+                                            [void]$dtApps.Rows.Add( $dr )
+                                        }
+                                        else
+                                        {
+                                            foreach( $app in $apps )
+                                            {
+                                                $dr = $dtApps.NewRow()
+                                                $dr['AppGroup']    = $ag.Name
+                                                $dr['GroupType']   = $agType
+                                                $dr['Workspace']   = $agWorkspace
+                                                $dr['AppName']     = $app.Name
+                                                $dr['DisplayName'] = [string]$app.FriendlyName
+                                                $dr['Description'] = [string]$app.Description
+                                                $dr['AppType']     = [string]$app.AppAliaPath
+                                                $dr['FilePath']    = if( -not [string]::IsNullOrWhiteSpace( $app.FilePath ) ) { $app.FilePath } elseif( -not [string]::IsNullOrWhiteSpace( $app.MsixPackageApplicationId ) ) { $app.MsixPackageApplicationId } else { '' }
+                                                [void]$dtApps.Rows.Add( $dr )
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        # Desktop app group - show single entry
+                                        $dr = $dtApps.NewRow()
+                                        $dr['AppGroup']    = $ag.Name
+                                        $dr['GroupType']   = $agType
+                                        $dr['Workspace']   = $agWorkspace
+                                        $dr['AppName']     = '(Full Desktop)'
+                                        $dr['DisplayName'] = [string]$ag.FriendlyName
+                                        $dr['Description'] = [string]$ag.Description
+                                        $dr['AppType']     = ''
+                                        $dr['FilePath']    = ''
+                                        [void]$dtApps.Rows.Add( $dr )
+                                    }
+
+                                    # Assignments (role assignments on the app group resource)
+                                    [array]$roleAssignments = @( Get-AzRoleAssignment -Scope $ag.Id -ErrorAction SilentlyContinue | Where-Object { $_.Scope -ieq $ag.Id } )
+                                    if( $roleAssignments.Count -eq 0 )
+                                    {
+                                        $dr = $dtAssign.NewRow()
+                                        $dr['AppGroup']      = $ag.Name
+                                        $dr['GroupType']     = $agType
+                                        $dr['Workspace']     = $agWorkspace
+                                        $dr['Principal']     = '(no assignments)'
+                                        $dr['PrincipalType'] = ''
+                                        $dr['Role']          = ''
+                                        [void]$dtAssign.Rows.Add( $dr )
+                                    }
+                                    else
+                                    {
+                                        foreach( $ra in $roleAssignments )
+                                        {
+                                            $dr = $dtAssign.NewRow()
+                                            $dr['AppGroup']      = $ag.Name
+                                            $dr['GroupType']     = $agType
+                                            $dr['Workspace']     = $agWorkspace
+                                            $dr['Principal']     = if( -not [string]::IsNullOrWhiteSpace( $ra.DisplayName ) ) { $ra.DisplayName } else { $ra.SignInName }
+                                            $dr['PrincipalType'] = [string]$ra.ObjectType
+                                            $dr['Role']          = [string]$ra.RoleDefinitionName
+                                            [void]$dtAssign.Rows.Add( $dr )
+                                        }
+                                    }
+                                }
+
+                                if( $appGroupsWindow = New-WPFWindow -inputXAML $appGroupsXAML )
+                                {
+                                    $appGroupsWindow.Owner = $mainWindow
+                                    $WPFlblAppGroupsHeader.Content  = "Application Groups: $hostPoolName  ($($appGroups.Count) group(s))"
+                                    $WPFlblAppGroupsStatus.Content  = "$($dtApps.Rows.Count) application(s) across $($appGroups.Count) group(s)  |  $($dtAssign.Rows.Count) assignment(s)"
+                                    $WPFdgAppGroupsApplications.ItemsSource = $dtApps.DefaultView
+                                    $WPFdgAppGroupsAssignments.ItemsSource  = $dtAssign.DefaultView
+                                    [void]$appGroupsWindow.ShowDialog()
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "Application Groups error: $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "Application Groups failed.`n$($_.Exception.Message)" , 'Application Groups' , 'Ok' , 'Error' )
+                    }
+                    break  # single selection operation
+                }
+                elseif( $operation -ieq 'Azure_VMActivityLogs' )
+                {
+                    try
+                    {
+                        Import-Module -Name Az.Monitor -Verbose:$false
+
+                        if( [string]::IsNullOrWhiteSpace( $selection.SubscriptionId ) )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "Unable to determine subscription for VM '$($selection.Name)'." , 'VM Activity Logs' , 'Ok' , 'Warning' )
+                        }
+                        else
+                        {
+                            [string]$capturedVMResourceId = "/subscriptions/$($selection.SubscriptionId)/resourceGroups/$($selection.ResourceGroup)/providers/Microsoft.Compute/virtualMachines/$($selection.Name)"
+                            [string]$capturedVMName       = $selection.Name
+
+                            if( $vmActLogsWindow = New-WPFWindow -inputXAML $vmActivityLogsXAML )
+                            {
+                                $vmActLogsWindow.Owner = $mainWindow
+                                $WPFlblVMActLogsHeader.Content = "Activity Logs: $capturedVMName"
+
+                                $WPFbtnVMActLogsRetrieve.Add_Click({
+                                    [string]$valStr = $WPFtxtVMActLogsValue.Text.Trim()
+                                    if( $valStr -notmatch '^\d+(\.\d+)?$' -or [double]$valStr -le 0 )
+                                    {
+                                        $WPFlblVMActLogsStatus.Foreground = [System.Windows.Media.Brushes]::Red
+                                        $WPFlblVMActLogsStatus.Content    = 'Please enter a positive number (e.g. 2 or 1.5).'
+                                        return
+                                    }
+
+                                    [double]$timeVal   = [double]$valStr
+                                    [TimeSpan]$span    = if( $WPFradVMActLogsHours.IsChecked ) { [TimeSpan]::FromHours( $timeVal ) } else { [TimeSpan]::FromDays( $timeVal ) }
+                                    [datetime]$startDT = (Get-Date) - $span
+
+                                    $WPFlblVMActLogsStatus.Foreground = [System.Windows.Media.Brushes]::Gray
+                                    $WPFlblVMActLogsStatus.Content    = 'Retrieving...'
+                                    $WPFdgVMActLogs.ItemsSource       = $null
+                                    $vmActLogsWindow.Dispatcher.Invoke( [System.Windows.Threading.DispatcherPriority]::Background , [action]{} )
+
+                                    try
+                                    {
+                                        [array]$logEntries = @( Get-AzActivityLog -ResourceId $capturedVMResourceId -StartTime $startDT -EndTime (Get-Date) -WarningAction SilentlyContinue -ErrorAction Stop | Sort-Object -Property EventTimestamp )
+
+                                        if( $logEntries.Count -eq 0 )
+                                        {
+                                            $WPFlblVMActLogsStatus.Content = 'No activity log entries found for the specified time range.'
+                                        }
+                                        else
+                                        {
+                                            $dt = [System.Data.DataTable]::new()
+                                            [void]$dt.Columns.Add( 'Time' )
+                                            [void]$dt.Columns.Add( 'Caller' )
+                                            [void]$dt.Columns.Add( 'Operation' )
+                                            [void]$dt.Columns.Add( 'Status' )
+                                            [void]$dt.Columns.Add( 'Level' )
+                                            [void]$dt.Columns.Add( 'ResourceType' )
+                                            [void]$dt.Columns.Add( 'Description' )
+                                            # Resolve a field that may be a plain string, a LocalizableString, or null
+                                            $resolveActVal = {
+                                                param( $v )
+                                                if( $null -eq $v )    { return '' }
+                                                if( $v -is [string] ) { return $v }
+                                                $lp = $v.PSObject.Properties.Item( 'LocalizedValue' )
+                                                if( $null -ne $lp -and -not [string]::IsNullOrEmpty( $lp.Value ) ) { return [string]$lp.Value }
+                                                $vp = $v.PSObject.Properties.Item( 'Value' )
+                                                if( $null -ne $vp -and -not [string]::IsNullOrEmpty( [string]$vp.Value ) ) { return [string]$vp.Value }
+                                                return ''
+                                            }
+                                            foreach( $entry in $logEntries )
+                                            {
+                                                $dr = $dt.NewRow()
+                                                $dr['Time']         = $entry.EventTimestamp.ToLocalTime().ToString('g')
+                                                $dr['Caller']       = [string]$entry.Caller
+                                                $dr['Operation']    = & $resolveActVal $entry.OperationName
+                                                $dr['Status']       = & $resolveActVal $entry.Status
+                                                $dr['Level']        = [string]$entry.Level
+                                                $dr['ResourceType'] = & $resolveActVal $entry.ResourceType
+                                                $dr['Description']  = [string]$entry.Description
+                                                [void]$dt.Rows.Add( $dr )
+                                            }
+                                            $WPFdgVMActLogs.ItemsSource    = $dt.DefaultView
+                                            $WPFlblVMActLogsStatus.Content = "$($logEntries.Count) entries  (oldest first)"
+                                        }
+                                    }
+                                    catch
+                                    {
+                                        $WPFlblVMActLogsStatus.Foreground = [System.Windows.Media.Brushes]::Red
+                                        $WPFlblVMActLogsStatus.Content    = "Retrieval failed: $($_.Exception.Message)"
+                                    }
+                                })
+
+                                [void]$vmActLogsWindow.ShowDialog()
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "VM Activity Logs error: $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "VM Activity Logs failed.`n$($_.Exception.Message)" , 'VM Activity Logs' , 'Ok' , 'Error' )
+                    }
+                    break  # single VM operation
                 }
                 elseif( $operation -ieq 'Azure_EditTags' )
                 {
@@ -6091,11 +7133,22 @@ Function Process-Action
                             if( $null -ne $osDisk.ManagedDisk )
                             {
                                 [void]$detailsBuilder.AppendLine( "  Managed Disk ID : $($osDisk.ManagedDisk.Id)" )
-                                [void]$detailsBuilder.AppendLine( "  Storage Type    : $($osDisk.ManagedDisk.StorageAccountType)" )
+                                $resolvedDisk = $null
+                                try
+                                {
+                                    [string]$diskRg   = ($osDisk.ManagedDisk.Id -split '/')[4]
+                                    [string]$diskName = ($osDisk.ManagedDisk.Id -split '/')[-1]
+                                    $resolvedDisk = Get-AzDisk -ResourceGroupName $diskRg -DiskName $diskName -ErrorAction Stop
+                                }
+                                catch {}
+                                [string]$diskSku    = if( $null -ne $resolvedDisk -and -not [string]::IsNullOrWhiteSpace( $resolvedDisk.Sku.Name ) ) { $resolvedDisk.Sku.Name } else { [string]$osDisk.ManagedDisk.StorageAccountType }
+                                [int]$resolvedSize  = if( $null -ne $resolvedDisk -and $resolvedDisk.DiskSizeGB -gt 0 ) { $resolvedDisk.DiskSizeGB } else { [int]$osDisk.DiskSizeGB }
+                                if( -not [string]::IsNullOrWhiteSpace( $diskSku ) )  { [void]$detailsBuilder.AppendLine( "  Disk SKU        : $diskSku" ) }
+                                if( $resolvedSize -gt 0 )                             { [void]$detailsBuilder.AppendLine( "  Disk Size GB    : $resolvedSize" ) }
                             }
-                            if( $null -ne $osDisk.DiskSizeGB -and $osDisk.DiskSizeGB -gt 0 )
+                            elseif( $null -ne $osDisk.DiskSizeGB -and $osDisk.DiskSizeGB -gt 0 )
                             {
-                                [void]$detailsBuilder.AppendLine( "  OS Disk Size GB : $($osDisk.DiskSizeGB)" )
+                                [void]$detailsBuilder.AppendLine( "  Disk Size GB    : $($osDisk.DiskSizeGB)" )
                             }
                         }
 
@@ -7945,10 +8998,22 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
         $WPFbuttonAzureClearFilter.Add_Click({
             $_.Handled = $true
             Write-Verbose "Azure Clear Filter clicked"
-            $WPFcheckBoxAzureAllVMs.IsChecked = $false
-            $script:azureColumnFilters.Clear()
-            ##$WPFcheckBoxAzureAVD.IsChecked = $false
-            Add-AzureVMsToListView -filter '' -regex $false -allVMs $WPFcheckBoxAzureAllVMs.IsChecked
+            $WPFbuttonAzureClearFilter.IsEnabled = $false
+            $mainWindow.Cursor = [System.Windows.Input.Cursors]::Wait
+            [System.Windows.Input.Mouse]::OverrideCursor = [System.Windows.Input.Cursors]::Wait
+            try
+            {
+                $WPFcheckBoxAzureAllVMs.IsChecked = $false
+                $script:azureColumnFilters.Clear()
+                ##$WPFcheckBoxAzureAVD.IsChecked = $false
+                Add-AzureVMsToListView -filter '' -regex $false -allVMs $WPFcheckBoxAzureAllVMs.IsChecked
+            }
+            finally
+            {
+                $WPFbuttonAzureClearFilter.IsEnabled = $true
+                [System.Windows.Input.Mouse]::OverrideCursor = $null
+                $mainWindow.ClearValue([System.Windows.FrameworkElement]::CursorProperty)
+            }
         })
         $WPFcheckBoxAzureAVD.IsChecked = $avd
 
@@ -7973,6 +9038,12 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
         $WPFAzureDeleteSessionHostAndVMContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_DeleteSessionHostAndVM' })
         $WPFAzureChangeDiskTypeContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_ChangeDiskType' })
         $WPFAzureEditTagsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_EditTags' })
+        $WPFAzureVMActivityLogsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_VMActivityLogs' })
+        $WPFAzureChangeHostPoolSizeContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_ChangeHostPoolSize' })
+        $WPFAzureHostPoolDetailContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_HostPoolDetail' })
+        $WPFAzureHostPoolActivityLogsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_HostPoolActivityLogs' })
+        $WPFAzureAppGroupsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_AppGroups' })
+        $WPFAzureAVDLogsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_AVDLogs' })
         $WPFAzureNameToClipboard.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'NameToClipboard' })
 
         $WPFlistViewAzureVMs.Add_PreviewMouseLeftButtonDown({
@@ -8315,10 +9386,10 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
 New-RemoteSession -rethrow
 
 # SIG # Begin signature block
-# MIIkkwYJKoZIhvcNAQcCoIIkhDCCJIACAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
+# MIIkkgYJKoZIhvcNAQcCoIIkgzCCJH8CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU2modC2a74N/VI0Y48gzW6JAX
-# RWyggh9gMIIFfTCCA2WgAwIBAgIQAdazdTZfIM2RHdcv5fmTZDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU+/YUx8BUMKjwgqTPkS+sbVjO
+# 1tSggh9gMIIFfTCCA2WgAwIBAgIQAdazdTZfIM2RHdcv5fmTZDANBgkqhkiG9w0B
 # AQsFADBaMQswCQYDVQQGEwJMVjEZMBcGA1UEChMQRW5WZXJzIEdyb3VwIFNJQTEw
 # MC4GA1UEAxMnR29HZXRTU0wgRzQgQ1MgUlNBNDA5NiBTSEEyNTYgMjAyMiBDQS0x
 # MB4XDTI1MDcyMTAwMDAwMFoXDTI2MDcyMDIzNTk1OVowcTELMAkGA1UEBhMCR0Ix
@@ -8485,30 +9556,30 @@ New-RemoteSession -rethrow
 # 2Yv7roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf4
 # 7CdxVRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxV
 # ZE/rptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT7
-# 5qaL6vdCvHlshtjdNXOCIUjsarfNZzGCBJ0wggSZAgEBMG4wWjELMAkGA1UEBhMC
+# 5qaL6vdCvHlshtjdNXOCIUjsarfNZzGCBJwwggSYAgEBMG4wWjELMAkGA1UEBhMC
 # TFYxGTAXBgNVBAoTEEVuVmVycyBHcm91cCBTSUExMDAuBgNVBAMTJ0dvR2V0U1NM
 # IEc0IENTIFJTQTQwOTYgU0hBMjU2IDIwMjIgQ0EtMQIQAdazdTZfIM2RHdcv5fmT
 # ZDAJBgUrDgMCGgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG
 # 9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIB
-# FTAjBgkqhkiG9w0BCQQxFgQURrhIlWn7pjbCYoKn0N64och4v7EwCwYHKoZIzj0C
-# AQUABGgwZgIxAIYnwarEmkQqztK72she8rqyFtcudol4yfbGXHPhiz6QFlsKLjo7
-# QBxuzDWHTEGCHAIxALFJcRnxUj/L8Wd2KOR74sjtutuJ4NvIKfxgs+r+Tqt6yMzE
-# 3x0nGpCHKO9FhhfX3aGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
-# CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
-# RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
-# MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA3MTYxNjIz
-# MTdaMC8GCSqGSIb3DQEJBDEiBCBSCcupOHthOorfH0j95kcH9gpwbf/6t1Hl3Lb2
-# m+DbvTANBgkqhkiG9w0BAQEFAASCAgCA3eTpJQXGyyblBbNYvDM38U9XQP+OmTzX
-# dV7VHjxOCey7inRSJRPIGC4tdvCwpSTm9F0qRyq5WZU++VVVSLFqDoS/1LMEGR4e
-# kBlw6F7snHTQn5H01Q60FC/sOhD4cl05CYzylzHmoQI5epdZn0VTUnd75q/ekDEL
-# irJf0ofbMlLbskIOu7WGK3nmx7aeTk/RdQxARuez/JuAEk0ScKLpZSYIHlO0G9vf
-# O6eMuCDJzeV36H33fm9YbevKB9dY5c2sF0AzEADt/p102Y4nOAG4+og43qe2QHR0
-# ODwToTWuIfclyQrqc/pEbYW+rgWF8nLItb9KXhARxCwy8KXl2kPdbVUnxCATwcYC
-# v6PJ//kdeVbhhM2SpsEVmkY7VmQCswBs1KKipieyzOOI0QCUrgUoJHiOazahE7+9
-# sDK+Z0lOkGUIOLyTqtuTdi65fFUqAq/modrMoAvlqD3OrSZXQux6sQh3UY3iOFwh
-# uOdAEInNW0TT29RccV+yuI8XtC+wbj61aQWpUsR05SPPR9lHB+igQqyDxung01F9
-# /oe0ltGbcYcKSOqvL5zBWLxdglEPdULmw+W81MY/rJ0kh7nCoWAGqECRI42TzRen
-# vbH2HB1Ez6KF97igi5LcFxx9eMtiJMKPJx8zQMoUFs7ih3HQla5fu3U0f7XBjYCV
-# G5MDt3uRKw==
+# FTAjBgkqhkiG9w0BCQQxFgQU4AyWChlkiDTl3x889S2vJt+Q66MwCwYHKoZIzj0C
+# AQUABGcwZQIxAKJhtK70THEo30uQfR+7H6h0ez5vqR6U00sPFr1WLzQ7AtKs3yrD
+# M7zdDGYUrAMKzQIwV1Tpuf+Frww9QogtnMIbRBjmLG53y0rA2M667cTrBUSi+Xfp
+# e5K45R8tic9+S3duoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTEL
+# MAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhE
+# aWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAy
+# MDI1IENBMQIQCoDvGEuN8QWC0cR2p5V0aDANBglghkgBZQMEAgEFAKBpMBgGCSqG
+# SIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDcxNzE2NTIw
+# NVowLwYJKoZIhvcNAQkEMSIEIEXZTLkHu4GjHxwXNtUsii/a/b+f11tX7v8M/PLU
+# bsVHMA0GCSqGSIb3DQEBAQUABIICAMCMz9Z3fG+Q1h0Dlm8wC/p+OK4cJRr11atR
+# w9WvXyGHmDFm9ZRBUc1DLzllZoqgcSK14ELNHyvCI8aogzSww79Xg00NFxUXGv2N
+# jR18LsVIECO6N8eLEvNYkK7HglnUOM567EOovlPZnfGynemk4O1Nuo+2Hdnrx3/u
+# /BGLVxthsG4XWwEequXJuv6qcv893fUAsrZZn0McAeAJimzhWQS5BZFvsZc3bWS3
+# d+JrCxa/FbKA4OefjV+CjBOcczaB38+FL2IFuTzGmzwSf82jwSbIxEnP0/pxeSBP
+# hJxLDawlb1+oSg+XEEQOUQRy8cyf7T4qvAMWfelXFvxvCN883inlzaZU5bMMEpKE
+# bpsY3rRQA3fc2tGcXrRzNIT0Hsnpw05x8es+H5ttcDUgKqQlqc5rPpLFw2epe6Ru
+# +zTnO/Q+aYektgPRzIkqGljfmIN/WcjeeNL/+k2Gpbq7T45QzY2qPLHZ9KGsaqgr
+# NsQgnwKuNLFQsdtourKwkjbVFrLZaTafYznQo7IVief95ky2yTSO1cmjSE9jMKGC
+# dhQadmhiRreZGHNWTDDe7kDXngyb6N2xwr95dX8GV776S3H4wjRvRGnJeyagvhuZ
+# 8yX07UrnrV+QM69KGC7aOaW7I8FufCr48WmHEg21MQugqfbyIaaKGNKh+9h8ouOW
+# Yqjr8TlJ
 # SIG # End signature block
