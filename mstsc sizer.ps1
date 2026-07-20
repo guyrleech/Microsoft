@@ -481,13 +481,59 @@ drivestoredirect:s:$drivesToRedirect
                         <CheckBox x:Name="checkBoxAzureAVD" Content="_AVD" Grid.Row="2" Margin="0,4,0,0" VerticalAlignment="Top" />
                     </Grid>
 
+<!--
                     <RadioButton x:Name="radioButtonAzureConnectByIP" Content="Connect by _IP" Grid.Row="1" Grid.Column="3" Margin="5,40,0,0"  GroupName="GroupBy" IsEnabled="False"/>
                     <RadioButton x:Name="radioButtonAzureConnectByName"   Content="Connect by _Name" Grid.Row="1" Grid.Column="3" Margin="5,70,0,0"  GroupName="GroupBy" IsChecked="True" IsEnabled="False"/>
-
                     <Label Content="RDP Port" Grid.Row="0" Grid.Column="3" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="5" />
                     <TextBox x:Name="textBoxAzureRDPPort" Grid.Row="1" Grid.Column="3" Margin="5" TextWrapping="Wrap" VerticalAlignment="Top" IsEnabled="False" />
-
-                    <ListView x:Name="listViewAzureVMs" Grid.Row="2" Grid.ColumnSpan="4" Margin="5" VerticalAlignment="Stretch" SelectionMode="Multiple">
+-->
+                    <ListView x:Name="listViewAzureVMs" Grid.Row="2" Grid.ColumnSpan="4" Margin="5" VerticalAlignment="Stretch" SelectionMode="Multiple" AlternationCount="2">
+                        <ListView.Resources>
+                            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}"                      Color="#0078D4"/>
+                            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}"                  Color="White"/>
+                            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}"     Color="#7FB8E8"/>
+                            <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="White"/>
+                        </ListView.Resources>
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="Background" Value="White"/>
+                                <Setter Property="Foreground" Value="Black"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListViewItem">
+                                            <Border Background="{TemplateBinding Background}"
+                                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                                    Padding="2,2,2,2">
+                                                <GridViewRowPresenter Content="{TemplateBinding Content}"
+                                                                      Columns="{Binding Path=View.Columns, RelativeSource={RelativeSource AncestorType=ListView}}"
+                                                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="ItemsControl.AlternationIndex" Value="1">
+                                        <Setter Property="Background" Value="#F5F5F5"/>
+                                    </Trigger>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#CCE8FF"/>
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#0063B1"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                    </Trigger>
+                                    <MultiTrigger>
+                                        <MultiTrigger.Conditions>
+                                            <Condition Property="IsSelected" Value="True"/>
+                                            <Condition Property="Selector.IsSelectionActive" Value="False"/>
+                                        </MultiTrigger.Conditions>
+                                        <Setter Property="Background" Value="#4D90C8"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                    </MultiTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListView.ItemContainerStyle>
                         <ListView.View>
                             <GridView>
                                 <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" />
@@ -538,6 +584,8 @@ drivestoredirect:s:$drivesToRedirect
                                 </MenuItem>
                                 <MenuItem Header="Host Pool" x:Name="AzureHostPoolContextMenu" IsEnabled="False">
                                     <MenuItem Header="Detail" x:Name="AzureHostPoolDetailContextMenu" />
+                                    <MenuItem Header="Open in Portal" x:Name="AzureHostPoolOpenInPortalContextMenu" />
+                                    <MenuItem Header="Acitivty (Log Analytics)" x:Name="AzureHostPoolLastLogonsContextMenu" />
                                     <MenuItem Header="Increase Size" x:Name="AzureChangeHostPoolSizeContextMenu" />
                                     <MenuItem Header="Activity Logs" x:Name="AzureHostPoolActivityLogsContextMenu" />
                                     <MenuItem Header="Application Groups" x:Name="AzureAppGroupsContextMenu" />
@@ -963,6 +1011,61 @@ drivestoredirect:s:$drivesToRedirect
                   SelectionMode="Extended"/>
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button x:Name="btnAVDLogsClose" Content="Close" Width="90" Height="32" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+'@
+
+[string]$hostPoolLastLogonsXAML = @'
+<Window x:Class="WPF_Scratchpad.HostPoolLastLogons"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Host Pool Last Logons" Height="600" Width="960" MinHeight="400" MinWidth="600"
+        ResizeMode="CanResize" WindowStartupLocation="CenterOwner">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Label x:Name="lblHostPoolLastLogonsHeader" Content="" Grid.Row="0" FontWeight="Bold" FontSize="12" Margin="0,0,0,4"/>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
+            <Label Content="Go back:" VerticalContentAlignment="Center" Padding="0,0,6,0"/>
+            <TextBox x:Name="txtHostPoolLastLogonsValue" Width="60" Height="26" VerticalContentAlignment="Center" Text="90"/>
+            <RadioButton x:Name="radHostPoolLastLogonsHours" Content="Hours" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+            <RadioButton x:Name="radHostPoolLastLogonsDays" Content="Days" IsChecked="True" Margin="8,0,0,0" VerticalContentAlignment="Center"/>
+            <CheckBox x:Name="chkHostPoolLastLogonsOnly" Content="Last logon per user only" Margin="16,0,0,0" VerticalContentAlignment="Center"/>
+            <Button x:Name="btnHostPoolLastLogonsRetrieve" Content="Retrieve" Width="80" Height="26" Margin="16,0,0,0"/>
+        </StackPanel>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,4">
+            <Label Content="Filter user:" VerticalContentAlignment="Center" Padding="0,0,6,0"/>
+            <TextBox x:Name="txtHostPoolLastLogonsUserFilter" Width="200" Height="26" VerticalContentAlignment="Center"/>
+            <Button x:Name="btnHostPoolLastLogonsClearFilter" Content="Clear" Width="50" Height="26" Margin="6,0,0,0"/>
+        </StackPanel>
+        <Label x:Name="lblHostPoolLastLogonsStatus" Content="" Grid.Row="3" Foreground="Gray" Margin="0,0,0,4" Padding="0"/>
+        <DataGrid x:Name="dgHostPoolLastLogons" Grid.Row="4"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
+                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                  AlternatingRowBackground="#F5F5F5" GridLinesVisibility="Horizontal"
+                  SelectionMode="Extended">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="User"            Binding="{Binding UserName}"        Width="200"/>
+                <DataGridTextColumn Header="Last Logon"      Binding="{Binding LastLogon}"        Width="160"/>
+                <DataGridTextColumn Header="Session Host"    Binding="{Binding SessionHostName}"  Width="220"/>
+                <DataGridTextColumn Header="Connection Type" Binding="{Binding ConnectionType}"   Width="120"/>
+                <DataGridTextColumn Header="Host Pool"       Binding="{Binding HostPool}"         Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="btnHostPoolLastLogonsClose" Content="Close" Width="90" Height="32" IsCancel="True"/>
         </StackPanel>
     </Grid>
 </Window>
@@ -5881,7 +5984,7 @@ Function Process-Action
                     continue
                 }
 
-                if( $Operation -match 'PowerOn|Detail|Resume|Clipboard|TakeSnapshot|MessageSession|OpenInPortal|ChangeDiskType|EditTags|ChangeHostPoolSize|HostPoolDetail|HostPoolActivityLogs|VMActivityLogs|AVDLogs|AppGroups|((Manage|Revert|Delete).*Snapshot)' ) ## don't need to prompt or will prompt with more information later
+                if( $Operation -match 'PowerOn|Detail|Resume|Clipboard|TakeSnapshot|MessageSession|OpenInPortal|ChangeDiskType|EditTags|ChangeHostPoolSize|HostPoolDetail|HostPoolOpenInPortal|HostPoolActivityLogs|HostPoolLastLogons|VMActivityLogs|AVDLogs|AppGroups|((Manage|Revert|Delete).*Snapshot)' ) ## don't need to prompt or will prompt with more information later
                 {
                     $answer = 'yes'
                 }
@@ -6256,6 +6359,8 @@ Function Process-Action
                                     @{ Property = 'Custom RDP Property'          ; Value = $hostPoolObject.CustomRdpProperty }
                                     @{ Property = 'SSO Client ID'                ; Value = $hostPoolObject.SsoClientId }
                                     @{ Property = 'Tags'                         ; Value = if( $hostPoolObject.Tag ) { ($hostPoolObject.Tag.Keys | Sort-Object | ForEach-Object { "$_=$($hostPoolObject.Tag[$_])" }) -join '; ' } else { '' } }
+                                    @{ Property = 'Created At'                   ; Value = if( $hostPoolObject.SystemDataCreatedAt ) { $hostPoolObject.SystemDataCreatedAt.ToString('g') } else { '' } }
+                                    @{ Property = 'Created By'                   ; Value = $hostPoolObject.SystemDataCreatedBy }
                                     @{ Property = 'Resource ID'                  ; Value = $hostPoolObject.Id }
                                 )
 
@@ -6400,6 +6505,158 @@ Function Process-Action
                     }
                     break  # single selection operation
                 }
+                elseif( $operation -ieq 'Azure_HostPoolLastLogons' )
+                {
+                    try
+                    {
+                        Import-Module -Name Az.DesktopVirtualization -Verbose:$false
+                        Import-Module -Name Az.Monitor               -Verbose:$false
+                        Import-Module -Name Az.OperationalInsights   -Verbose:$false
+
+                        [string]$hostPoolName = $selection.HostPool
+                        if( [string]::IsNullOrWhiteSpace( $hostPoolName ) )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "VM '$($selection.Name)' is not associated with an AVD host pool." , 'Host Pool Last Logons' , 'Ok' , 'Warning' )
+                        }
+                        else
+                        {
+                            $hostPoolObject = $null
+                            $hostPoolObject = Get-AzWvdHostPool -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $hostPoolName } | Select-Object -First 1
+
+                            if( $null -eq $hostPoolObject )
+                            {
+                                [void][Windows.MessageBox]::Show( $mainWindow , "Could not find host pool '$hostPoolName'." , 'Host Pool Last Logons' , 'Ok' , 'Error' )
+                            }
+                            else
+                            {
+                                [string]$workspaceResourceId = $null
+                                $diagSettings = $null
+                                $diagSettings = Get-AzDiagnosticSetting -ResourceId $hostPoolObject.Id -ErrorAction SilentlyContinue
+                                foreach( $ds in $diagSettings )
+                                {
+                                    if( -not [string]::IsNullOrWhiteSpace( $ds.WorkspaceId ) )
+                                    {
+                                        $workspaceResourceId = $ds.WorkspaceId
+                                        break
+                                    }
+                                }
+
+                                if( [string]::IsNullOrWhiteSpace( $workspaceResourceId ) )
+                                {
+                                    [void][Windows.MessageBox]::Show( $mainWindow , "No Log Analytics workspace is configured in the diagnostic settings for host pool '$hostPoolName'." , 'Host Pool Last Logons' , 'Ok' , 'Warning' )
+                                }
+                                else
+                                {
+                                    [string]$wsName           = ($workspaceResourceId -split '/')[-1]
+                                    [string]$wsRg             = ($workspaceResourceId -split '/')[4]
+                                    $wsObject                 = $null
+                                    $wsObject                 = Get-AzOperationalInsightsWorkspace -ResourceGroupName $wsRg -Name $wsName -ErrorAction Stop
+                                    [string]$capturedWsId     = $wsObject.CustomerId.ToString()
+                                    [string]$capturedHPName   = $hostPoolName
+
+                                    if( $hostPoolLastLogonsWindow = New-WPFWindow -inputXAML $hostPoolLastLogonsXAML )
+                                    {
+                                        $hostPoolLastLogonsWindow.Owner = $mainWindow
+                                        $WPFlblHostPoolLastLogonsHeader.Content = "Last Logons: $capturedHPName"
+
+                                        $WPFtxtHostPoolLastLogonsUserFilter.Add_TextChanged({
+                                            $dv = $WPFdgHostPoolLastLogons.ItemsSource -as [System.Data.DataView]
+                                            if( $null -ne $dv )
+                                            {
+                                                [string]$f = $WPFtxtHostPoolLastLogonsUserFilter.Text.Trim()
+                                                $dv.RowFilter = if( [string]::IsNullOrEmpty( $f ) ) { '' } else { "UserName LIKE '%$f%'" }
+                                            }
+                                        })
+                                        $WPFbtnHostPoolLastLogonsClearFilter.Add_Click({
+                                            $WPFtxtHostPoolLastLogonsUserFilter.Text = ''
+                                        })
+
+                                        $WPFbtnHostPoolLastLogonsRetrieve.Add_Click({
+                                            [string]$valStr = $WPFtxtHostPoolLastLogonsValue.Text.Trim()
+                                            if( $valStr -notmatch '^\d+(\.\d+)?$' -or [double]$valStr -le 0 )
+                                            {
+                                                $WPFlblHostPoolLastLogonsStatus.Foreground = [System.Windows.Media.Brushes]::Red
+                                                $WPFlblHostPoolLastLogonsStatus.Content    = 'Please enter a positive number.'
+                                                return
+                                            }
+
+                                            [double]$timeVal   = [double]$valStr
+                                            [string]$unit      = if( $WPFradHostPoolLastLogonsHours.IsChecked ) { 'h' } else { 'd' }
+                                            [bool]$lastOnly    = $WPFchkHostPoolLastLogonsOnly.IsChecked
+
+                                            $hostPoolLastLogonsWindow.Cursor                   = [System.Windows.Input.Cursors]::Wait
+                                            $WPFlblHostPoolLastLogonsStatus.Foreground          = [System.Windows.Media.Brushes]::Gray
+                                            $WPFlblHostPoolLastLogonsStatus.Content             = 'Retrieving...'
+                                            $WPFdgHostPoolLastLogons.ItemsSource               = $null
+                                            $WPFtxtHostPoolLastLogonsUserFilter.Text            = ''
+                                            $hostPoolLastLogonsWindow.Dispatcher.Invoke( [System.Windows.Threading.DispatcherPriority]::Background , [action]{} )
+
+                                            [string]$summarise    = if( $lastOnly ) { "| summarize LastLogon = max(TimeGenerated) by UserName, SessionHostName, ConnectionType, _ResourceId" } else { '' }
+                                            [string]$projectLogon = if( $lastOnly ) { 'LastLogon' } else { 'LastLogon = TimeGenerated' }
+
+                                            [string]$kql = @"
+WVDConnections
+| where TimeGenerated > ago(${timeVal}${unit})
+| where State == 'Connected'
+| where _ResourceId contains '/hostpools/$capturedHPName'
+$summarise
+| project UserName, $projectLogon, SessionHostName, ConnectionType, HostPool = tostring(split(_ResourceId, '/')[-1])
+| sort by LastLogon desc
+"@
+
+                                            try
+                                            {
+                                                $qResult = Invoke-AzOperationalInsightsQuery -WorkspaceId $capturedWsId -Query $kql -ErrorAction Stop
+                                                [array]$rows = @( $qResult.Results )
+                                                if( $rows.Count -eq 0 )
+                                                {
+                                                    $WPFlblHostPoolLastLogonsStatus.Content = 'No logon data found for the specified time range.'
+                                                }
+                                                else
+                                                {
+                                                    $dt = [System.Data.DataTable]::new()
+                                                    [void]$dt.Columns.Add('UserName')
+                                                    [void]$dt.Columns.Add('LastLogon')
+                                                    [void]$dt.Columns.Add('SessionHostName')
+                                                    [void]$dt.Columns.Add('ConnectionType')
+                                                    [void]$dt.Columns.Add('HostPool')
+                                                    foreach( $row in $rows )
+                                                    {
+                                                        $dr = $dt.NewRow()
+                                                        $dr['UserName']        = $row.UserName
+                                                        $dr['LastLogon']       = $row.LastLogon
+                                                        $dr['SessionHostName'] = $row.SessionHostName
+                                                        $dr['ConnectionType']  = $row.ConnectionType
+                                                        $dr['HostPool']        = $row.HostPool
+                                                        [void]$dt.Rows.Add( $dr )
+                                                    }
+                                                    $WPFdgHostPoolLastLogons.ItemsSource    = $dt.DefaultView
+                                                    $WPFlblHostPoolLastLogonsStatus.Content = "$($rows.Count) logon entries"
+                                                }
+                                            }
+                                            catch
+                                            {
+                                                $WPFlblHostPoolLastLogonsStatus.Foreground = [System.Windows.Media.Brushes]::Red
+                                                $WPFlblHostPoolLastLogonsStatus.Content    = "Query failed: $($_.Exception.Message)"
+                                            }
+                                            finally
+                                            {
+                                                $hostPoolLastLogonsWindow.Cursor = [System.Windows.Input.Cursors]::Arrow
+                                            }
+                                        })
+                                        [void]$hostPoolLastLogonsWindow.ShowDialog()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        Write-Warning -Message "Host Pool Last Logons error: $($_.Exception.Message)"
+                        [void][Windows.MessageBox]::Show( $mainWindow , "Host Pool Last Logons failed.`n$($_.Exception.Message)" , 'Host Pool Last Logons' , 'Ok' , 'Error' )
+                    }
+                    break  # single selection operation
+                }
                 elseif( $operation -ieq 'Azure_AVDLogs' )
                 {
                     try
@@ -6530,6 +6787,34 @@ union isfuzzy=true WVDConnections, WVDErrors, WVDCheckpoints, WVDManagement, WVD
                         [void][Windows.MessageBox]::Show( $mainWindow , "AVD Logs failed.`n$($_.Exception.Message)" , 'AVD Logs' , 'Ok' , 'Error' )
                     }
                     break  # single VM operation
+                }
+                elseif( $operation -ieq 'Azure_HostPoolOpenInPortal' )
+                {
+                    [string]$hostPoolName = $selection.HostPool
+                    if( [string]::IsNullOrWhiteSpace( $hostPoolName ) )
+                    {
+                        [void][Windows.MessageBox]::Show( $mainWindow , "VM '$($selection.Name)' is not associated with an AVD host pool." , 'Host Pool - Open in Portal' , 'Ok' , 'Warning' )
+                    }
+                    else
+                    {
+                        [string]$hostPoolId = if( $null -ne $hostPoolIdsByName ) { $hostPoolIdsByName[ $hostPoolName ] } else { $null }
+                        if( [string]::IsNullOrWhiteSpace( $hostPoolId ) )
+                        {
+                            # Not in cache - fetch directly
+                            $hostPoolObject = Get-AzWvdHostPool -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq $hostPoolName } | Select-Object -First 1
+                            if( $null -ne $hostPoolObject ) { $hostPoolId = $hostPoolObject.Id }
+                        }
+                        if( [string]::IsNullOrWhiteSpace( $hostPoolId ) )
+                        {
+                            [void][Windows.MessageBox]::Show( $mainWindow , "Could not find resource ID for host pool '$hostPoolName'." , 'Host Pool - Open in Portal' , 'Ok' , 'Error' )
+                        }
+                        else
+                        {
+                            [string]$portalUrl = "https://portal.azure.com/#resource$hostPoolId/overview"
+                            Start-Process -FilePath $portalUrl -Verb Open
+                        }
+                    }
+                    break  # single selection operation
                 }
                 elseif( $operation -ieq 'Azure_AppGroups' )
                 {
@@ -9041,6 +9326,8 @@ else ## if not passed displayNumber or displaymanufacturer , display a GUI with 
         $WPFAzureVMActivityLogsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_VMActivityLogs' })
         $WPFAzureChangeHostPoolSizeContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_ChangeHostPoolSize' })
         $WPFAzureHostPoolDetailContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_HostPoolDetail' })
+        $WPFAzureHostPoolOpenInPortalContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_HostPoolOpenInPortal' })
+        $WPFAzureHostPoolLastLogonsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_HostPoolLastLogons' })
         $WPFAzureHostPoolActivityLogsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_HostPoolActivityLogs' })
         $WPFAzureAppGroupsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_AppGroups' })
         $WPFAzureAVDLogsContextMenu.Add_Click( { Process-Action -GUIobject $WPFlistViewAzureVMs -Operation 'Azure_AVDLogs' })
@@ -9388,8 +9675,8 @@ New-RemoteSession -rethrow
 # SIG # Begin signature block
 # MIIkkgYJKoZIhvcNAQcCoIIkgzCCJH8CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU+/YUx8BUMKjwgqTPkS+sbVjO
-# 1tSggh9gMIIFfTCCA2WgAwIBAgIQAdazdTZfIM2RHdcv5fmTZDANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUg1AZMBr3mQiKAaJ3G8z7x0bw
+# IK6ggh9gMIIFfTCCA2WgAwIBAgIQAdazdTZfIM2RHdcv5fmTZDANBgkqhkiG9w0B
 # AQsFADBaMQswCQYDVQQGEwJMVjEZMBcGA1UEChMQRW5WZXJzIEdyb3VwIFNJQTEw
 # MC4GA1UEAxMnR29HZXRTU0wgRzQgQ1MgUlNBNDA5NiBTSEEyNTYgMjAyMiBDQS0x
 # MB4XDTI1MDcyMTAwMDAwMFoXDTI2MDcyMDIzNTk1OVowcTELMAkGA1UEBhMCR0Ix
@@ -9561,25 +9848,25 @@ New-RemoteSession -rethrow
 # IEc0IENTIFJTQTQwOTYgU0hBMjU2IDIwMjIgQ0EtMQIQAdazdTZfIM2RHdcv5fmT
 # ZDAJBgUrDgMCGgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG
 # 9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIB
-# FTAjBgkqhkiG9w0BCQQxFgQU4AyWChlkiDTl3x889S2vJt+Q66MwCwYHKoZIzj0C
-# AQUABGcwZQIxAKJhtK70THEo30uQfR+7H6h0ez5vqR6U00sPFr1WLzQ7AtKs3yrD
-# M7zdDGYUrAMKzQIwV1Tpuf+Frww9QogtnMIbRBjmLG53y0rA2M667cTrBUSi+Xfp
-# e5K45R8tic9+S3duoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTEL
+# FTAjBgkqhkiG9w0BCQQxFgQUT+OJay9vl/FtHhj+aBu3n33BZSgwCwYHKoZIzj0C
+# AQUABGcwZQIxAJrtUKuIrwkost087/AzOw90spPz6b5ZgTa/J5PwKv3yvo09pCWM
+# fvDCUQ+R2NAr1AIwMr7zhK17KhdSW48ANowdyFsyJdt3clGFSDE7+9iZNl/R9hUa
+# P6Yxm7Lj9IG+5noUoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTEL
 # MAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhE
 # aWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAy
 # MDI1IENBMQIQCoDvGEuN8QWC0cR2p5V0aDANBglghkgBZQMEAgEFAKBpMBgGCSqG
-# SIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDcxNzE2NTIw
-# NVowLwYJKoZIhvcNAQkEMSIEIEXZTLkHu4GjHxwXNtUsii/a/b+f11tX7v8M/PLU
-# bsVHMA0GCSqGSIb3DQEBAQUABIICAMCMz9Z3fG+Q1h0Dlm8wC/p+OK4cJRr11atR
-# w9WvXyGHmDFm9ZRBUc1DLzllZoqgcSK14ELNHyvCI8aogzSww79Xg00NFxUXGv2N
-# jR18LsVIECO6N8eLEvNYkK7HglnUOM567EOovlPZnfGynemk4O1Nuo+2Hdnrx3/u
-# /BGLVxthsG4XWwEequXJuv6qcv893fUAsrZZn0McAeAJimzhWQS5BZFvsZc3bWS3
-# d+JrCxa/FbKA4OefjV+CjBOcczaB38+FL2IFuTzGmzwSf82jwSbIxEnP0/pxeSBP
-# hJxLDawlb1+oSg+XEEQOUQRy8cyf7T4qvAMWfelXFvxvCN883inlzaZU5bMMEpKE
-# bpsY3rRQA3fc2tGcXrRzNIT0Hsnpw05x8es+H5ttcDUgKqQlqc5rPpLFw2epe6Ru
-# +zTnO/Q+aYektgPRzIkqGljfmIN/WcjeeNL/+k2Gpbq7T45QzY2qPLHZ9KGsaqgr
-# NsQgnwKuNLFQsdtourKwkjbVFrLZaTafYznQo7IVief95ky2yTSO1cmjSE9jMKGC
-# dhQadmhiRreZGHNWTDDe7kDXngyb6N2xwr95dX8GV776S3H4wjRvRGnJeyagvhuZ
-# 8yX07UrnrV+QM69KGC7aOaW7I8FufCr48WmHEg21MQugqfbyIaaKGNKh+9h8ouOW
-# Yqjr8TlJ
+# SIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDcyMDExMzY0
+# MFowLwYJKoZIhvcNAQkEMSIEIKGkesYCDEfi+rGQTi8etSMkJ19mSl15ScX5TbO8
+# XBk8MA0GCSqGSIb3DQEBAQUABIICALRGZjfZ/3zf8FjUzYM4KudI63GTiXbeAz9m
+# Dn1owSFZFtJZn5IagK904ggT6RjBvtpdQkAbbg+5skMgb+KbBLimCKsbZJgTKTBx
+# CFKub5VdpHoP1mRTRnacMzDVPJPLdlrfxfNIduKPlb+S1ySjVirgHgN2ol0ZF+ZR
+# Hl1kq/fLebmtEcBifpNKhXnsEoj/DVJpvQSalzk58cjhUgOX9ZB8L17KDnZwaZA3
+# WWuk/5HSb4WxyhoBoTG2tVAjkn+1T8gO+EcFJ8iG6PrMJ1ePly8mCXkDtz6PY3A4
+# 91Zj0irICCu3fkOyFdkfudgOy4HxV2vbN+lha3oihQouiwSaocTXGVB1TQZH+PeK
+# Pg/5LTKGmW81IiEyjYyfzNGp8qkmEXbg0iqkQdUKTEctjIH5Kk+tJWPqDsFkYcII
+# KXkW2V/R3j5FWzdCRlB8YZrmBiw67VoPEJhZuypwaCWjogMjoDoOpds41BoJQwa7
+# T4lcBkqejvdqc0aAYmZ/kPsQAN/YeWAJnTNNWUpR1/Up0aVoAfVH3B8D7nIvGWDc
+# QqljcuDxg4OZfDtwjjRv1wIyyBLOqG8WY7QmgJfzKN7oRO30pgqR7uHeA2drA6Mb
+# 7gyEVJq9Fnf/70ewauc8P50dmlPWKRUPUkQ12Vhm/5ks47Fw4pYtUu9vUcH0yx7Q
+# hub2YVx7
 # SIG # End signature block
