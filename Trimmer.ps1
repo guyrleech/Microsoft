@@ -220,9 +220,9 @@ Param
     [switch]$report ,
     [switch]$nogridview ,
     [string]$outputFile ,
-    [int]$above = 10MB ,
-    [int]$minWorkingSet = -1 ,
-    [int]$maxWorkingSet = -1 ,
+    [long]$above = 10MB ,
+    [long]$minWorkingSet = -1 ,
+    [long]$maxWorkingSet = -1 ,
     [int]$pollPeriod = 5 ,
     [switch]$hardMax ,
     [switch]$hardMin ,
@@ -256,9 +256,9 @@ namespace PInvoke.Win32
     public static class Memory
     {
         [DllImport("kernel32.dll", SetLastError=true)]
-        public static extern bool SetProcessWorkingSetSizeEx( IntPtr proc, UIntPtr min, UIntPtr max , uint flags );
+        public static extern bool SetProcessWorkingSetSizeEx( IntPtr proc, UInt64 min, UInt64 max , UInt32 flags );
         [DllImport("kernel32.dll", SetLastError=true)]
-        public static extern bool GetProcessWorkingSetSizeEx( IntPtr hProcess, ref UIntPtr min, ref UIntPtr max , ref uint flags );
+        public static extern bool GetProcessWorkingSetSizeEx( IntPtr hProcess, ref UInt64 min, ref UInt64 max , ref UInt32 flags );
     }
     public static class UserInput
     {  
