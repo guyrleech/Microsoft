@@ -90,55 +90,108 @@ if( [string]::IsNullOrEmpty( $newExtension ) )
 
 function ConvertTo-Ico
 {
-    param
-    (
+    param(
         [Parameter(Mandatory)][string]$Path,
-        [string]$OutFile = [IO.Path]::ChangeExtension($Path, '.ico'),
+        [string]$OutFile,
+        [ValidateNotNullOrEmpty()]
+        [ValidateRange(1, 256)]
         [int[]]$Sizes = @(16, 24, 32, 48, 64, 128, 256)
     )
     Add-Type -AssemblyName System.Drawing
-    $src = [System.Drawing.Image]::FromFile((Resolve-Path $Path))
-    try {
-        $images = foreach ($s in $Sizes) {
-            $bmp = New-Object System.Drawing.Bitmap $s, $s
-            $g = [System.Drawing.Graphics]::FromImage($bmp)
-            $g.InterpolationMode = 'HighQualityBicubic'
-            $g.SmoothingMode     = 'HighQuality'
-            $g.PixelOffsetMode   = 'HighQuality'
-            $g.DrawImage($src, 0, 0, $s, $s)
-            $g.Dispose()
-            $ms = New-Object IO.MemoryStream
-            $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-            $bmp.Dispose()
-            [pscustomobject]@{ Size = $s; Bytes = $ms.ToArray() }
-        }
-    } finally { $src.Dispose() }
 
-    $fs = [IO.File]::Create($OutFile)
-    $w  = New-Object IO.BinaryWriter $fs
-    try {
-        # ICONDIR header: reserved, type 1 = icon, image count
-        $w.Write([uint16]0); $w.Write([uint16]1); $w.Write([uint16]$images.Count)
-        $offset = 6 + 16 * $images.Count
-        foreach ($i in $images) {
-            # ICONDIRENTRY: width/height (0 = 256), colours, reserved, planes, bpp, size, offset
-            $dim = if ($i.Size -ge 256) { 0 } else { $i.Size }
-            $w.Write([byte]$dim); $w.Write([byte]$dim)
-            $w.Write([byte]0);    $w.Write([byte]0)
-            $w.Write([uint16]1);  $w.Write([uint16]32)
-            $w.Write([uint32]$i.Bytes.Length); $w.Write([uint32]$offset)
-            $offset += $i.Bytes.Length
+    # Resolve against the current PowerShell location (.NET would use the process folder instead)
+    $resolvedSourcePath = (Resolve-Path -LiteralPath $Path).ProviderPath
+    if (-not $OutFile)
+    {
+        $OutFile = [System.IO.Path]::ChangeExtension($resolvedSourcePath, '.ico')
+    }
+    $resolvedOutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile)
+
+    $sourceImage = [System.Drawing.Image]::FromFile($resolvedSourcePath)
+    try
+    {
+        # @( ) keeps this an array even when only one size is requested,
+        # otherwise .Count fails under Set-StrictMode
+        $iconImages = @(foreach ($iconSize in $Sizes)
+        {
+            $resizedBitmap = New-Object -TypeName System.Drawing.Bitmap -ArgumentList $iconSize, $iconSize
+            $graphics = [System.Drawing.Graphics]::FromImage($resizedBitmap)
+            $graphics.InterpolationMode = 'HighQualityBicubic'
+            $graphics.SmoothingMode     = 'HighQuality'
+            $graphics.PixelOffsetMode   = 'HighQuality'
+            $graphics.DrawImage($sourceImage, 0, 0, $iconSize, $iconSize)
+            $graphics.Dispose()
+
+            $pngStream = New-Object -TypeName System.IO.MemoryStream
+            $resizedBitmap.Save($pngStream, [System.Drawing.Imaging.ImageFormat]::Png)
+            $resizedBitmap.Dispose()
+
+            [pscustomobject]@{
+                Size     = $iconSize
+                PngBytes = $pngStream.ToArray()
+            }
+        })
+    }
+    finally
+    {
+        $sourceImage.Dispose()
+    }
+
+    $outputStream = [System.IO.File]::Create($resolvedOutputPath)
+    $binaryWriter = New-Object -TypeName System.IO.BinaryWriter -ArgumentList $outputStream
+    try
+    {
+        # ICONDIR header: reserved, type (1 = icon), number of images
+        $binaryWriter.Write([uint16]0)
+        $binaryWriter.Write([uint16]1)
+        $binaryWriter.Write([uint16]$iconImages.Count)
+
+        $headerSize = 6
+        $directoryEntrySize = 16
+        $imageDataOffset = $headerSize + $directoryEntrySize * $iconImages.Count
+
+        foreach ($iconImage in $iconImages)
+        {
+            # ICONDIRENTRY: width/height (0 means 256), colour count, reserved,
+            # colour planes, bits per pixel, image data size, image data offset
+            if ($iconImage.Size -ge 256)
+            {
+                $dimensionByte = 0
+            }
+            else
+            {
+                $dimensionByte = $iconImage.Size
+            }
+            $binaryWriter.Write([byte]$dimensionByte)
+            $binaryWriter.Write([byte]$dimensionByte)
+            $binaryWriter.Write([byte]0)
+            $binaryWriter.Write([byte]0)
+            $binaryWriter.Write([uint16]1)
+            $binaryWriter.Write([uint16]32)
+            $binaryWriter.Write([uint32]$iconImage.PngBytes.Length)
+            $binaryWriter.Write([uint32]$imageDataOffset)
+            $imageDataOffset += $iconImage.PngBytes.Length
         }
-        foreach ($i in $images) { $w.Write($i.Bytes) }
-    } finally { $w.Dispose() }
-    Get-Item $OutFile
+
+        foreach ($iconImage in $iconImages)
+        {
+            $binaryWriter.Write($iconImage.PngBytes)
+        }
+    }
+    finally
+    {
+        $binaryWriter.Dispose()
+    }
+
+    Get-Item -LiteralPath $resolvedOutputPath
 }
+
 [void][Reflection.Assembly]::LoadWithPartialName( 'System.Windows.Forms' )
 
 [hashtable]$icoSizeParam = @{}
 if( $PSBoundParameters[ 'iconSizes' ] )
 {
-    $icoSizeParam.Add( 'iconSizes' , $iconSizes )
+    $icoSizeParam.Add( 'Sizes' , $iconSizes )
 }
 
 Get-ChildItem -Path $path -Recurse:$recurse -Force -Filter "*$oldExtension" | ForEach-Object `
@@ -167,7 +220,7 @@ Get-ChildItem -Path $path -Recurse:$recurse -Force -Filter "*$oldExtension" | Fo
     }
     elseif( $destFormat -ieq 'ico' )
     {
-        ConvertTo-Ico -Path $_.FullName -OutFile $newFile @iconSizes
+        ConvertTo-Ico -Path $_.FullName -OutFile $newFile @icoSizeParam
     }
     else
     {
